@@ -97,7 +97,6 @@ namespace TMRJW
                 this.WindowStyle = WindowStyle.None;
                 this.WindowState = WindowState.Maximized;
             }
-        }
 
         // Método llamado por MainWindow para mostrar la imagen del Texto del Año
         public void MostrarImagenTexto(BitmapImage imagen)

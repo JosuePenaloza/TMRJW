@@ -1,10 +1,10 @@
-﻿using System.Windows;
-using TMRJW.Properties;
+﻿using System;
+using System.Windows;
 using Microsoft.Win32;
-// 🌟 IMPORTE NECESARIO para acceder a la clase Screen 🌟
-using System.Windows.Forms;
+using TMRJW.Properties;
+using TMRJW.Models; // ✅ Importamos la clase Monitors
 
-namespace  TMRJW
+namespace TMRJW
 {
     /// <summary>
     /// Lógica de interacción para AjustesWindow.xaml
@@ -19,56 +19,52 @@ namespace  TMRJW
             CargarMonitoresDisponibles();
 
             // 1. Cargar la configuración al abrir la ventana
-
-            // Cargar la Ruta de la Imagen guardada
             TxtImagenTextoAnioRuta.Text = Settings.Default.ImagenTextoAnio;
 
-            // Cargar la selección del Monitor. Usamos el índice guardado.
-            // Si el índice es válido (>= 0), lo selecciona; de lo contrario, se queda en el valor por defecto de XAML.
-            if (Settings.Default.MonitorSalidaIndex >= 0 && Settings.Default.MonitorSalidaIndex < CboMonitorSalida.Items.Count)
+            if (Settings.Default.MonitorSalidaIndex >= 0 &&
+                Settings.Default.MonitorSalidaIndex < CboMonitorSalida.Items.Count)
             {
                 CboMonitorSalida.SelectedIndex = Settings.Default.MonitorSalidaIndex;
             }
             else
             {
-                // Si no hay índice guardado o es inválido, selecciona el primero (monitor principal)
                 CboMonitorSalida.SelectedIndex = 0;
             }
         }
 
-        // 🌟 NUEVO MÉTODO PARA CARGAR LOS MONITORES 🌟
+        // =====================================================
+        // ✅ NUEVA VERSIÓN - USANDO LA CLASE MODELS.MONITORS
+        // =====================================================
         private void CargarMonitoresDisponibles()
         {
             CboMonitorSalida.Items.Clear();
 
-            // Usamos System.Windows.Forms.Screen
-            Screen[] screens = Screen.AllScreens;
+            var screens = Monitors.GetAllMonitors();
 
-            for (int i = 0; i < screens.Length; i++)
+            for (int i = 0; i < screens.Count; i++)
             {
-                // Agregamos un item con el nombre del monitor (Principal o Secundario)
-                string monitorName = $"Monitor {i + 1} ({screens[i].DeviceName.TrimEnd('\\', '.')})";
-                if (screens[i].Primary)
-                {
+                var monitor = screens[i];
+                string monitorName = $"Monitor {i + 1} ({monitor.DeviceName})";
+
+                if (monitor.IsPrimary)
                     monitorName += " - Principal";
-                }
+
+                monitorName += $" [{monitor.Width}x{monitor.Height}]";
 
                 CboMonitorSalida.Items.Add(monitorName);
             }
 
-            // Asegurar que haya al menos un elemento para seleccionar
             if (CboMonitorSalida.Items.Count > 0)
-            {
                 CboMonitorSalida.SelectedIndex = 0;
-            }
         }
 
-        // --- Métodos de Gestión de la Imagen del Texto del Año ---
+        // =====================================================
+        // 📷 GESTIÓN DE IMAGEN DEL TEXTO DEL AÑO
+        // =====================================================
 
-        // Método para abrir el explorador y seleccionar la imagen
         private void BtnSeleccionarImagen_Click(object sender, RoutedEventArgs e)
         {
-            var openFileDialog = new Microsoft.Win32.OpenFileDialog
+            var openFileDialog = new OpenFileDialog
             {
                 Filter = "Archivos de Imagen|*.jpg;*.jpeg;*.png;*.bmp"
             };
@@ -79,44 +75,47 @@ namespace  TMRJW
             }
         }
 
-        // Método para borrar la ruta de la imagen
         private void BtnBorrarImagen_Click(object sender, RoutedEventArgs e)
         {
             TxtImagenTextoAnioRuta.Text = string.Empty;
-            _ = System.Windows.MessageBox.Show("La ruta de la imagen ha sido borrada. Recuerda guardar los ajustes para que el cambio se aplique.", "Imagen Borrada", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            MessageBox.Show(
+                "La ruta de la imagen ha sido borrada. Recuerda guardar los ajustes para que el cambio se aplique.",
+                "Imagen Borrada",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
-        // --- Método para Guardar y Cerrar ---
+        // =====================================================
+        // 💾 GUARDAR AJUSTES
+        // =====================================================
 
         private void BtnGuardarAjustes_Click(object sender, RoutedEventArgs e)
         {
-            // 1. Guardar la Ruta de la Imagen
             Settings.Default.ImagenTextoAnio = TxtImagenTextoAnioRuta.Text;
-
-            // 2. Guardar la selección del Monitor (guardamos el índice seleccionado)
             Settings.Default.MonitorSalidaIndex = CboMonitorSalida.SelectedIndex;
-
-            // 3. Persistir los cambios en el disco
             Settings.Default.Save();
 
-            _ = System.Windows.MessageBox.Show("Configuración guardada.", "Guardado Exitoso", MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            MessageBox.Show("Configuración guardada.", "Guardado Exitoso",
+                MessageBoxButton.OK, MessageBoxImage.Information);
 
             this.Close();
         }
 
-        // --- Método de Administración de Semanas ---
+        // =====================================================
+        // 📅 ADMINISTRACIÓN DE SEMANAS
+        // =====================================================
 
         private void BtnBorrarSemanaActual_Click(object sender, RoutedEventArgs e)
         {
-            var result = System.Windows.MessageBox.Show(
+            var result = MessageBox.Show(
                 "¿Está seguro que desea borrar la semana actual del programa cargado?",
                 "Confirmar Borrado",
-                System.Windows.MessageBoxButton.YesNo,
-                System.Windows.MessageBoxImage.Warning);
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
 
-            if (result == System.Windows.MessageBoxResult.Yes)
+            if (result == MessageBoxResult.Yes)
             {
-                _ = System.Windows.MessageBox.Show("Borrado de semana solicitado.", "Pendiente");
+                MessageBox.Show("Borrado de semana solicitado.", "Pendiente");
             }
         }
     }

@@ -14,6 +14,14 @@
           MouseUp="LayoutRoot_MouseUp"
           MouseWheel="LayoutRoot_MouseWheel">
 
+        <!-- MediaElement para reproducir video (oculto por defecto) -->
+        <MediaElement x:Name="mediaElement"
+                      LoadedBehavior="Manual"
+                      UnloadedBehavior="Manual"
+                      Stretch="Uniform"
+                      Visibility="Collapsed"/>
+
+        <!-- Imagen de proyección -->
         <Image x:Name="imageDisplay" 
                HorizontalAlignment="Center" 
                VerticalAlignment="Center"
@@ -26,6 +34,30 @@
                 </TransformGroup>
             </Image.RenderTransform>
         </Image>
+
+        <!-- Texto superpuesto (oculto por defecto) -->
+        <TextBlock x:Name="textDisplay"
+                   Foreground="White"
+                   FontSize="36"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   TextAlignment="Center"
+                   Margin="40"/>
+
+        <!-- Barra de controles básicos para video -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,16" Background="#22000000">
+            <!-- Si necesitas espacio interno, usa un elemento contenedor como Border -->
+            <Border Padding="6" Background="Transparent">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="BtnPlayPause" Width="60" Height="30" Margin="6" Click="BtnPlayPause_Click">Play</Button>
+                    <Button x:Name="BtnStop" Width="60" Height="30" Margin="6" Click="BtnStop_Click">Stop</Button>
+                    <TextBlock Text="Vol:" Foreground="White" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                    <Slider x:Name="VolumeSlider" Width="140" Minimum="0" Maximum="100" ValueChanged="VolumeSlider_ValueChanged" Value="75"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
 
     </Grid>
 </Window>

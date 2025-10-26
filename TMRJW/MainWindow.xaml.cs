@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -10,6 +11,8 @@ using System.Windows.Media.Imaging;
 using TMRJW.Properties;
 using VersOne.Epub;
 using System.Windows.Input; // añadido
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 
 namespace TMRJW
 {
@@ -19,7 +22,21 @@ namespace TMRJW
         private bool _isProjecting = false;
 
         private List<BitmapImage> _epubImages = new List<BitmapImage>();
+        private List<BitmapImage> _userImages = new List<BitmapImage>(); // imágenes cargadas por el usuario
         private List<GrupoImagenes> _gruposImagenes = new List<GrupoImagenes>();
+
+        private List<VideoItem> _videos = new List<VideoItem>(); // videos precargados
+
+        private double _previewScale = 1.0;
+        private const double PreviewMinScale = 0.2;
+        private const double PreviewMaxScale = 5.0;
+        private const double PreviewScaleStep = 0.1;
+        private bool _isPanningPreview = false;
+        private Point _lastPreviewMousePos;
+
+        private double _monitorScale = 1.0;
+        private bool _isPanningMonitor = false;
+        private Point _lastMonitorMousePos;
 
         public MainWindow()
         {
@@ -162,9 +179,19 @@ namespace TMRJW
 
         private void AgruparImagenesPorSeccion()
         {
-            _gruposImagenes.Clear();
+            // Reconstruir grupo de forma determinística (orden fijo):
+            var nuevos = new List<GrupoImagenes>();
 
-            _gruposImagenes.Add(new GrupoImagenes
+            if (_userImages.Count > 0)
+            {
+                nuevos.Add(new GrupoImagenes
+                {
+                    TituloPestana = "Imágenes Cargadas",
+                    Imagenes = _userImages.ToList()
+                });
+            }
+
+            nuevos.Add(new GrupoImagenes
             {
                 TituloPestana = "📚 Todas las Imágenes (Introducción)",
                 Imagenes = _epubImages.ToList(),
@@ -177,7 +204,7 @@ namespace TMRJW
 
             while (imageIndex < _epubImages.Count)
             {
-                _gruposImagenes.Add(new GrupoImagenes
+                nuevos.Add(new GrupoImagenes
                 {
                     TituloPestana = $"Punto {groupNumber}",
                     Imagenes = _epubImages.Skip(imageIndex).Take(imagesPerGroup).ToList()
@@ -186,6 +213,8 @@ namespace TMRJW
                 imageIndex += imagesPerGroup;
                 groupNumber++;
             }
+
+            _gruposImagenes = nuevos;
         }
 
         private void MostrarImagenesEnPanelDinamico()
@@ -193,10 +222,13 @@ namespace TMRJW
             var tabControl = FindControl<TabControl>("TabControlImagenes");
             if (tabControl == null) return;
 
+            // Conservar encabezado seleccionado para evitar "reordenamiento visual" al reconstruir.
+            string? selectedHeader = (tabControl.SelectedItem as TabItem)?.Header?.ToString();
+
             tabControl.Items.Clear();
 
             // Intentar obtener el DataTemplate definido en XAML; si no existe, crear uno en tiempo de ejecución.
-            DataTemplate itemTemplate = this.TryFindResource("ImageItemDataTemplate") as DataTemplate;
+            DataTemplate? itemTemplate = this.TryFindResource("ImageItemDataTemplate") as DataTemplate;
             if (itemTemplate == null)
             {
                 var factoryImg = new FrameworkElementFactory(typeof(Image));
@@ -322,6 +354,19 @@ namespace TMRJW
                 };
 
                 tabControl.Items.Add(tabItem);
+            }
+
+            // Restaurar la pestaña seleccionada por encabezado (si existe)
+            if (!string.IsNullOrEmpty(selectedHeader))
+            {
+                for (int i = 0; i < tabControl.Items.Count; i++)
+                {
+                    if ((tabControl.Items[i] as TabItem)?.Header?.ToString() == selectedHeader)
+                    {
+                        tabControl.SelectedIndex = i;
+                        return;
+                    }
+                }
             }
 
             if (tabControl.Items.Count > 0)
@@ -525,27 +570,114 @@ namespace TMRJW
 
         private void BtnAsociarMedia_Click(object sender, RoutedEventArgs e)
         {
-            // Abrir diálogo para seleccionar video (mp4, mkv, etc.)
+            // Ahora permite seleccionar videos o imágenes; agrega su registro en secciones apropiadas.
             var dlg = new Microsoft.Win32.OpenFileDialog
             {
-                Filter = "Videos (*.mp4;*.mkv;*.wmv;*.avi)|*.mp4;*.mkv;*.wmv;*.avi",
-                Multiselect = false
+                Filter = "Videos e Imágenes (*.mp4;*.mkv;*.wmv;*.avi;*.jpg;*.jpeg;*.png;*.bmp;*.gif)|*.mp4;*.mkv;*.wmv;*.avi;*.jpg;*.jpeg;*.png;*.bmp;*.gif",
+                Multiselect = true
             };
             if (dlg.ShowDialog() != true) return;
 
-            string ruta = dlg.FileName;
-            if (proyeccionWindow != null)
+            foreach (string ruta in dlg.FileNames)
             {
-                try
+                string ext = Path.GetExtension(ruta).ToLowerInvariant();
+                if (IsImageExtension(ext))
                 {
-                    proyeccionWindow.MostrarVideo(ruta);
-                    // Mostrar también en el monitor pequeño si desea previsualizar
-                    var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                    if (txtInfo != null) txtInfo.Text = $"Video cargado: {Path.GetFileName(ruta)}";
+                    var img = LoadBitmapFromFile(ruta);
+                    if (img != null)
+                    {
+                        _userImages.Add(img);
+                        AgruparImagenesPorSeccion();
+                        MostrarImagenesEnPanelDinamico();
+
+                        // previsualizar en el monitor pequeño y en proyección
+                        var monitor = FindControl<Image>("MonitorDeSalida");
+                        if (monitor != null) monitor.Source = img;
+                        proyeccionWindow?.MostrarImagenTexto(img);
+
+                        var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                        if (txtInfo != null) txtInfo.Text = $"Imagen cargada: {Path.GetFileName(ruta)}";
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    MessageBox.Show($"No se pudo cargar el video: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    // tratar como video
+                    var vi = new VideoItem { FilePath = ruta, FileName = Path.GetFileName(ruta) };
+
+                    // Generar thumbnail (icono asociado del archivo como fallback rápido)
+                    vi.Thumbnail = GetFileIconAsBitmap(ruta) ?? CreatePlaceholderThumbnail();
+
+                    _videos.Add(vi);
+
+                    // Agregar entrada al programa semanal (ListaPrograma)
+                    var lista = FindControl<ListBox>("ListaPrograma");
+                    if (lista != null)
+                    {
+                        lista.Items.Add(new TextBlock { Text = $"Video: {vi.FileName}", Foreground = Brushes.Gold, FontWeight = FontWeights.Bold });
+                    }
+
+                    // Intentar mostrar info/previsualización en UI si hay control para lista de videos
+                    var listaVideos = FindControl<ListBox>("ListaVideos");
+                    if (listaVideos != null)
+                    {
+                        // Si no hay ItemTemplate, crear una sencilla con imagen y nombre
+                        if (listaVideos.ItemTemplate == null)
+                        {
+                            var stackFactory = new FrameworkElementFactory(typeof(StackPanel));
+                            stackFactory.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+
+                            var imgFactory = new FrameworkElementFactory(typeof(Image));
+                            imgFactory.SetValue(FrameworkElement.WidthProperty, 48.0);
+                            imgFactory.SetValue(FrameworkElement.HeightProperty, 48.0);
+                            imgFactory.SetValue(FrameworkElement.MarginProperty, new Thickness(4));
+                            imgFactory.SetBinding(Image.SourceProperty, new System.Windows.Data.Binding("Thumbnail"));
+                            stackFactory.AppendChild(imgFactory);
+
+                            var txtFactory = new FrameworkElementFactory(typeof(TextBlock));
+                            txtFactory.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
+                            txtFactory.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("FileName"));
+                            stackFactory.AppendChild(txtFactory);
+
+                            listaVideos.ItemTemplate = new DataTemplate { VisualTree = stackFactory };
+                        }
+
+                        // Asegurarse de que el handler de doble click esté suscrito sólo una vez
+                        listaVideos.MouseDoubleClick -= ListaVideos_MouseDoubleClick;
+                        listaVideos.MouseDoubleClick += ListaVideos_MouseDoubleClick;
+
+                        listaVideos.Items.Add(vi);
+
+                        // Generar thumbnail real en segundo plano (no bloqueante) y actualizar item cuando esté listo
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                var generated = GenerateVideoFrameThumbnail(ruta, 160, 90);
+                                if (generated != null)
+                                {
+                                    Application.Current.Dispatcher.Invoke(() =>
+                                    {
+                                        vi.Thumbnail = generated;
+                                        // Forzar refresco del item UI
+                                        var idx = listaVideos.Items.IndexOf(vi);
+                                        if (idx >= 0)
+                                        {
+                                            // re-asignar item para forzar el binding a refrescar
+                                            listaVideos.Items.RemoveAt(idx);
+                                            listaVideos.Items.Insert(idx, vi);
+                                        }
+                                    });
+                                }
+                            }
+                            catch { /* ignorar errores de generación */ }
+                        });
+                    }
+
+                    var txtInfo2 = FindControl<TextBlock>("TxtInfoMedia");
+                    if (txtInfo2 != null) txtInfo2.Text = $"Video cargado: {vi.FileName}";
+
+                    // NO reproducir automáticamente en la proyección.
+                    // El video se reproducirá sólo cuando el usuario haga doble click en la lista de videos.
                 }
             }
         }
@@ -576,9 +708,401 @@ namespace TMRJW
             }
             return null;
         }
+
+        // P/Invoke para obtener icono asociado sin depender de System.Drawing
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, out SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DestroyIcon(IntPtr hIcon);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        private struct SHFILEINFO
+        {
+            public IntPtr hIcon;
+            public int iIcon;
+            public uint dwAttributes;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szDisplayName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+            public string szTypeName;
+        }
+
+        private const uint SHGFI_ICON = 0x000000100;
+        private const uint SHGFI_SMALLICON = 0x000000001;
+
+        private BitmapImage? GetFileIconAsBitmap(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+
+                SHFILEINFO shfi;
+                IntPtr res = SHGetFileInfo(path, 0, out shfi, (uint)Marshal.SizeOf<SHFILEINFO>(), SHGFI_ICON | SHGFI_SMALLICON);
+                if (shfi.hIcon == IntPtr.Zero) return null;
+
+                try
+                {
+                    // Crear BitmapSource desde HICON
+                    var bmpSource = Imaging.CreateBitmapSourceFromHIcon(shfi.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(48, 48));
+
+                    // Encoder a PNG en memoria para obtener BitmapImage (compatible con el resto del código)
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(bmpSource));
+                    using (var ms = new MemoryStream())
+                    {
+                        encoder.Save(ms);
+                        ms.Position = 0;
+                        var bi = new BitmapImage();
+                        bi.BeginInit();
+                        bi.CacheOption = BitmapCacheOption.OnLoad;
+                        bi.StreamSource = ms;
+                        bi.EndInit();
+                        bi.Freeze();
+                        return bi;
+                    }
+                }
+                finally
+                {
+                    // liberar HICON obtenido
+                    DestroyIcon(shfi.hIcon);
+                }
+            }
+            catch
+            {
+                // fallback nulo
+            }
+            return null;
+        }
+
+        private static bool IsImageExtension(string ext)
+        {
+            switch (ext)
+            {
+                case ".jpg":
+                case ".jpeg":
+                case ".png":
+                case ".bmp":
+                case ".gif":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Clase ligera para registrar videos precargados
+        private class VideoItem
+        {
+            public string FilePath { get; set; } = string.Empty;
+            public string FileName { get; set; } = string.Empty;
+            public BitmapImage? Thumbnail { get; set; } = null;
+        }
+
+        private BitmapImage CreatePlaceholderThumbnail(int width = 160, int height = 90)
+        {
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, height));
+                var ft = new FormattedText("VIDEO",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight,
+                    new Typeface("Segoe UI"),
+                    20, Brushes.White,
+                    VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                var x = (width - ft.Width) / 2;
+                var y = (height - ft.Height) / 2;
+                dc.DrawText(ft, new Point(x, y));
+            }
+
+            var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(dv);
+
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(rtb));
+            using (var ms = new MemoryStream())
+            {
+                encoder.Save(ms);
+                ms.Position = 0;
+                var bi = new BitmapImage();
+                bi.BeginInit();
+                bi.CacheOption = BitmapCacheOption.OnLoad;
+                bi.StreamSource = ms;
+                bi.EndInit();
+                bi.Freeze();
+                return bi;
+            }
+        }
+
+        private void ListaVideos_MouseDoubleClick(object? sender, MouseButtonEventArgs e)
+        {
+            var lista = sender as ListBox;
+            if (lista?.SelectedItem is VideoItem vi)
+            {
+                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                if (txtInfo != null) txtInfo.Text = $"Reproduciendo video: {vi.FileName}";
+
+                if (proyeccionWindow != null)
+                {
+                    try
+                    {
+                        proyeccionWindow.MostrarVideo(vi.FilePath);
+                        proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+                        if (proyeccionWindow.WindowState == WindowState.Minimized)
+                            proyeccionWindow.WindowState = WindowState.Normal;
+                        proyeccionWindow.Show();
+                        _isProjecting = true;
+
+                        var btn = FindControl<Button>("BtnProyectarHDMI");
+                        if (btn != null) btn.Content = "PROYECTAR ON/OFF (ON)";
+                    }
+                    catch
+                    {
+                        // ignorar errores de reproducción
+                    }
+                }
+            }
+        }
+
+        private BitmapImage? GenerateVideoFrameThumbnail(string path, int width, int height)
+        {
+            try
+            {
+                BitmapImage? result = null;
+                var mre = new AutoResetEvent(false);
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    var mp = new MediaPlayer();
+                    mp.MediaOpened += (s, e) => mre.Set();
+                    mp.Open(new Uri(path));
+                    // esperar apertura breve
+                    if (!mre.WaitOne(2000))
+                    {
+                        mp.Close();
+                        return;
+                    }
+
+                    // seek a un pequeño offset para evitar frame en negro
+                    mp.Position = TimeSpan.FromMilliseconds(300);
+                    mp.Play();
+                    System.Threading.Thread.Sleep(150);
+
+                    var dv = new DrawingVisual();
+                    using (var dc = dv.RenderOpen())
+                    {
+                        var vb = new VideoDrawing { Rect = new Rect(0, 0, width, height), Player = mp };
+                        dc.DrawDrawing(vb);
+                    }
+
+                    var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+                    rtb.Render(dv);
+                    mp.Close();
+
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(rtb));
+                    using (var ms = new MemoryStream())
+                    {
+                        encoder.Save(ms);
+                        ms.Position = 0;
+                        var bi = new BitmapImage();
+                        bi.BeginInit();
+                        bi.CacheOption = BitmapCacheOption.OnLoad;
+                        bi.StreamSource = ms;
+                        bi.EndInit();
+                        bi.Freeze();
+                        result = bi;
+                    }
+                });
+
+                return result;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void BtnPreviewPlayPause_Click(object sender, RoutedEventArgs e)
+        {
+            if (proyeccionWindow == null) return;
+
+            try
+            {
+                // Alternar reproducción en la ventana de proyección
+                if (proyeccionWindow.IsPlayingVideo)
+                {
+                    proyeccionWindow.PauseVideo();
+                    (sender as Button)!.Content = "Play";
+                }
+                else
+                {
+                    proyeccionWindow.PlayVideo();
+                    (sender as Button)!.Content = "Pause";
+
+                    // Asegurar que la ventana de proyección esté visible en el monitor seleccionado
+                    proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+                    if (proyeccionWindow.WindowState == WindowState.Minimized)
+                        proyeccionWindow.WindowState = WindowState.Normal;
+                    proyeccionWindow.Show();
+                    _isProjecting = true;
+
+                    var btn = FindControl<Button>("BtnProyectarHDMI");
+                    if (btn != null) btn.Content = "PROYECTAR ON/OFF (ON)";
+                }
+            }
+            catch
+            {
+                // ignorar errores de control
+            }
+        }
+
+        private void BtnPreviewStop_Click(object sender, RoutedEventArgs e)
+        {
+            if (proyeccionWindow == null) return;
+
+            try
+            {
+                proyeccionWindow.StopVideo();
+
+                var playBtn = FindControl<Button>("BtnPreviewPlayPause");
+                if (playBtn != null) playBtn.Content = "Play";
+            }
+            catch
+            {
+                // ignorar errores
+            }
+        }
+
+        private void PreviewImage_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (PreviewImage == null) return;
+
+            double oldScale = _previewScale;
+            if (e.Delta > 0) _previewScale = Math.Min(PreviewMaxScale, _previewScale + PreviewScaleStep);
+            else _previewScale = Math.Max(PreviewMinScale, _previewScale - PreviewScaleStep);
+
+            double scaleFactor = _previewScale / oldScale;
+
+            var pos = e.GetPosition(PreviewImage);
+
+            // Ajustar translate para mantener el punto bajo el cursor
+            PreviewTranslateTransform.X = (1 - scaleFactor) * (pos.X) + scaleFactor * PreviewTranslateTransform.X;
+            PreviewTranslateTransform.Y = (1 - scaleFactor) * (pos.Y) + scaleFactor * PreviewTranslateTransform.Y;
+
+            PreviewScaleTransform.ScaleX = _previewScale;
+            PreviewScaleTransform.ScaleY = _previewScale;
+
+            // NOTA: NO propagar al proyector — el zoom de previsualización es privado
+            e.Handled = true;
+        }
+
+        private void PreviewImage_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningPreview = true;
+                _lastPreviewMousePos = e.GetPosition(this);
+                try { Mouse.Capture(PreviewImage); } catch { }
+            }
+        }
+
+        private void PreviewImage_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_isPanningPreview && e.LeftButton == MouseButtonState.Pressed)
+            {
+                var pos = e.GetPosition(this);
+                var dx = pos.X - _lastPreviewMousePos.X;
+                var dy = pos.Y - _lastPreviewMousePos.Y;
+
+                PreviewTranslateTransform.X += dx;
+                PreviewTranslateTransform.Y += dy;
+
+                _lastPreviewMousePos = pos;
+
+                // NOTA: NO propagar al proyector — panning de previsualización es privado
+            }
+        }
+
+        private void PreviewImage_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningPreview = false;
+                try { Mouse.Capture(null); } catch { }
+            }
+        }
+
+        private void BtnPreviewReset_Click(object sender, RoutedEventArgs e)
+        {
+            _previewScale = 1.0;
+            PreviewScaleTransform.ScaleX = 1.0;
+            PreviewScaleTransform.ScaleY = 1.0;
+            PreviewTranslateTransform.X = 0;
+            PreviewTranslateTransform.Y = 0;
+
+            // NOTA: NO propagar al proyector — reset de previsualización es privado
+        }
+
+        private void Monitor_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (MonitorDeSalida == null) return;
+
+            double oldScale = _monitorScale;
+            if (e.Delta > 0) _monitorScale = Math.Min(PreviewMaxScale, _monitorScale + PreviewScaleStep);
+            else _monitorScale = Math.Max(PreviewMinScale, _monitorScale - PreviewScaleStep);
+
+            double scaleFactor = _monitorScale / oldScale;
+            var pos = e.GetPosition(MonitorDeSalida);
+
+            MonitorTranslateTransform.X = (1 - scaleFactor) * (pos.X) + scaleFactor * MonitorTranslateTransform.X;
+            MonitorTranslateTransform.Y = (1 - scaleFactor) * (pos.Y) + scaleFactor * MonitorTranslateTransform.Y;
+
+            MonitorScaleTransform.ScaleX = _monitorScale;
+            MonitorScaleTransform.ScaleY = _monitorScale;
+
+            // Propagar la transformación a la ventana de proyección
+            proyeccionWindow?.UpdateImageTransform(_monitorScale, MonitorTranslateTransform.X, MonitorTranslateTransform.Y);
+
+            e.Handled = true;
+        }
+
+        private void Monitor_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningMonitor = true;
+                _lastMonitorMousePos = e.GetPosition(this);
+                try { Mouse.Capture(MonitorDeSalida); } catch { }
+            }
+        }
+
+        private void Monitor_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_isPanningMonitor && e.LeftButton == MouseButtonState.Pressed)
+            {
+                var pos = e.GetPosition(this);
+                var dx = pos.X - _lastMonitorMousePos.X;
+                var dy = pos.Y - _lastMonitorMousePos.Y;
+
+                MonitorTranslateTransform.X += dx;
+                MonitorTranslateTransform.Y += dy;
+
+                _lastMonitorMousePos = pos;
+
+                // Propagar al proyector
+                proyeccionWindow?.UpdateImageTransform(_monitorScale, MonitorTranslateTransform.X, MonitorTranslateTransform.Y);
+            }
+        }
+
+        private void Monitor_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningMonitor = false;
+                try { Mouse.Capture(null); } catch { }
+            }
+        }
     }
 }
-
-
-
-

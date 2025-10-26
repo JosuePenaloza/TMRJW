@@ -9,6 +9,7 @@
 
     <Grid x:Name="LayoutRoot" 
           Background="Black"
+          IsHitTestVisible="False"
           MouseDown="LayoutRoot_MouseDown"
           MouseMove="LayoutRoot_MouseMove"
           MouseUp="LayoutRoot_MouseUp"
@@ -26,7 +27,8 @@
                HorizontalAlignment="Center" 
                VerticalAlignment="Center"
                Stretch="Uniform"
-               RenderTransformOrigin="0.5,0.5">
+               RenderTransformOrigin="0.5,0.5"
+               IsHitTestVisible="False">
             <Image.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform x:Name="ScaleTransform" />
@@ -51,10 +53,10 @@
             <!-- Si necesitas espacio interno, usa un elemento contenedor como Border -->
             <Border Padding="6" Background="Transparent">
                 <StackPanel Orientation="Horizontal">
-                    <Button x:Name="BtnPlayPause" Width="60" Height="30" Margin="6" Click="BtnPlayPause_Click">Play</Button>
-                    <Button x:Name="BtnStop" Width="60" Height="30" Margin="6" Click="BtnStop_Click">Stop</Button>
-                    <TextBlock Text="Vol:" Foreground="White" VerticalAlignment="Center" Margin="8,0,4,0"/>
-                    <Slider x:Name="VolumeSlider" Width="140" Minimum="0" Maximum="100" ValueChanged="VolumeSlider_ValueChanged" Value="75"/>
+                    <Button x:Name="BtnPlayPause" Width="60" Height="30" Margin="6" Click="BtnPlayPause_Click" Visibility="Collapsed">Play</Button>
+                    <Button x:Name="BtnStop" Width="60" Height="30" Margin="6" Click="BtnStop_Click" Visibility="Collapsed">Stop</Button>
+                    
+                    <Slider x:Name="VolumeSlider" Visibility="Collapsed" Minimum="0" Maximum="100" />
                 </StackPanel>
             </Border>
         </StackPanel>

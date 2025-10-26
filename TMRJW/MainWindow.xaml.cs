@@ -1,306 +1,584 @@
-﻿using System.Windows;
-using TMRJW.Properties;
-using System.Windows.Media.Imaging;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Windows.Controls; // Para TextBlock y ListBox items
-using System.Windows.Input; // Necesario para los stubs (MouseDoubleClick)
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using TMRJW.Properties;
 using VersOne.Epub;
+using System.Windows.Input; // añadido
 
 namespace TMRJW
 {
-    /// <summary>
-    /// Lógica de interacción para MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
-        // Variable para controlar la ventana de proyección (la segunda pantalla)
-        private ProyeccionWindow proyeccionWindow = null;
-        private bool _isProjecting = false; // Estado maestro de la proyección
+        private ProyeccionWindow? proyeccionWindow;
+        private bool _isProjecting = false;
 
-        // 🌟 AGREGAR: Instancia del WebScraper 🌟
-        private WebScraper _scraper = new WebScraper();
+        private List<BitmapImage> _epubImages = new List<BitmapImage>();
+        private List<GrupoImagenes> _gruposImagenes = new List<GrupoImagenes>();
 
         public MainWindow()
         {
             InitializeComponent();
-
-            // Inicializa la ventana de proyección al inicio (pero oculta)
             proyeccionWindow = new ProyeccionWindow();
-
-            // 🌟 Paso 3 (Monitor): Coloca la ventana de proyección en el monitor seleccionado al inicio (aunque esté oculta)
+            // No mostrar inicialmente; posicionarlo en el monitor configurado cuando se active
             proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
 
-            // 🌟 LLAMADA INICIAL PARA CARGAR EL PROGRAMA DE LA SEMANA ACTUAL 🌟
-            // Usamos un ejemplo: la semana 41 de 2025.
-            CargarProgramaSemana(2025, 41);
+            // Asegurar que al cerrar la ventana principal cerramos la ventana de proyección
+            this.Closing += MainWindow_Closing;
         }
 
-        // EN MainWindow.xaml.cs
-
-        // 🌟 NUEVO MÉTODO CENTRAL: Intenta cargar de la Web, si falla, usa Offline 🌟
-        private async void CargarProgramaSemana(int anio, int semana)
+        private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            // Opcional: Deshabilita los botones mientras carga
-            // BtnCargarArchivo.IsEnabled = false;
-
-            TxtInfoMedia.Text = $"Cargando programa para {anio}/{semana}...";
-
-            // 1. Intentar obtener el contenido en línea
-            string contenidoWeb = await _scraper.ObtenerContenidoSemanal(anio, semana);
-
-            if (contenidoWeb.StartsWith("❌") || contenidoWeb.StartsWith("⚠️"))
+            try
             {
-                // 2. Si falla (Sin Internet o error de parsing), usar la opción offline (EPUB)
-                System.Windows.MessageBox.Show(
-                    "Fallo al obtener el programa web. Active el modo offline (EPUB) manualmente.",
-                    "Advertencia de Conexión / Parsing",
-                    System.Windows.MessageBoxButton.OK,
-                    System.Windows.MessageBoxImage.Warning
-                );
-
-                // 💡 Por ahora, solo actualizamos el mensaje de la lista con el error
-                LlenarListaProgramaDesdeError(contenidoWeb);
-                TxtInfoMedia.Text = "Programa Offline (Pendiente de cargar EPUB)";
+                // Cerrar la ventana de proyección si existe
+                proyeccionWindow?.Close();
             }
-            else
+            catch
             {
-                // 3. Mostrar el contenido web y llenar la lista
-                LlenarListaProgramaDesdeTexto(contenidoWeb);
-                TxtInfoMedia.Text = $"Programa cargado (Web) para {anio}/{semana}";
-
-                // 🌟 AJUSTE CRÍTICO APLICADO AQUÍ 🌟
-                if (_isProjecting && proyeccionWindow != null)
-                {
-                    // Llama al nuevo método para enviar el texto a la ventana de proyección
-                    proyeccionWindow.MostrarTextoPrograma(contenidoWeb);
-                }
+                // Ignorar errores de cierre
             }
-
-            // BtnCargarArchivo.IsEnabled = true; // Habilita de nuevo
+            // Forzar el cierre de la aplicación para liberar el ejecutable
+            Application.Current.Shutdown();
         }
 
-
-        // 1. Método para abrir la Ventana de Ajustes (BtnAjustes)
-        private void BtnAjustes_Click(object sender, RoutedEventArgs e)
+        // Helper para obtener controles por nombre (evita dependencias del campo generado por XAML si faltan)
+        private T? FindControl<T>(string name) where T : class
         {
-            // Instancia y muestra la ventana de ajustes
-            AjustesWindow ajustes = new AjustesWindow();
-            ajustes.ShowDialog();
-
-            // Si el usuario cambia el monitor de salida, actualizamos la posición si la proyección está ON.
-            if (_isProjecting)
-            {
-                proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
-            }
+            return this.FindName(name) as T;
         }
 
-        // 2. Método para el botón PROYECTAR TEXTO DEL AÑO
-        private void BtnTextoDelAnio_Click(object sender, RoutedEventArgs e)
+        private async void BtnCargarArchivo_Click(object sender, RoutedEventArgs e)
         {
-            // VERIFICACIÓN: Sólo proyectar si el interruptor maestro está en ON
-            if (!_isProjecting)
+            var openFileDialog = new Microsoft.Win32.OpenFileDialog
             {
-                System.Windows.MessageBox.Show("Active el interruptor 'PROYECTAR ON/OFF' para iniciar la transmisión.", "Transmisión Inactiva", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
+                Filter = "Archivos EPUB/HTML (*.epub;*.html;*.htm)|*.epub;*.html;*.htm"
+            };
 
-            string rutaImagen = Settings.Default.ImagenTextoAnio;
+            if (openFileDialog.ShowDialog() != true) return;
 
-            if (string.IsNullOrEmpty(rutaImagen) || !File.Exists(rutaImagen))
-            {
-                System.Windows.MessageBox.Show("No se ha configurado la ruta de la imagen del Texto del Año en Ajustes, o el archivo no existe.", "Error de Configuración", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
+            string rutaArchivo = openFileDialog.FileName;
 
             try
             {
-                BitmapImage bitmap = new BitmapImage(new Uri(rutaImagen));
-                MonitorDeSalida.Source = bitmap; // VISTA PREVIA
-                proyeccionWindow.MostrarImagenTexto(bitmap);
-                TxtInfoMedia.Text = "Reproduciendo: Texto del Año";
-            }
-            catch (Exception ex)
-            {
-                System.Windows.MessageBox.Show($"Error al cargar la imagen: {ex.Message}", "Error de Imagen", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        // 3. Método para el interruptor ON/OFF de la proyección (Control Maestro)
-        private void BtnProyectarHDMI_Click(object sender, RoutedEventArgs e)
-        {
-            _isProjecting = !_isProjecting;
-
-            if (_isProjecting)
-            {
-                // Paso 3 (Monitor): ASEGURAR que la ventana esté en el monitor correcto antes de mostrarla
-                proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
-
-                proyeccionWindow.Show();
-                BtnProyectarHDMI.Content = "PROYECTAR ON/OFF (ON)";
-                BtnProyectarHDMI.Background = System.Windows.Media.Brushes.Green;
-
-                // Lógica de carga automática del Texto del Año (como antes)
-                string rutaImagen = Settings.Default.ImagenTextoAnio;
-                BitmapImage bitmap = null;
-
-                if (!string.IsNullOrEmpty(rutaImagen) && File.Exists(rutaImagen))
+                if (Path.GetExtension(rutaArchivo).Equals(".epub", StringComparison.OrdinalIgnoreCase))
                 {
-                    try
+                    _epubImages.Clear();
+                    var epubBook = await EpubReader.ReadBookAsync(rutaArchivo);
+
+                    var primeraImagen = CargarImagenesEPUB(epubBook);
+
+                    int audioCount = 0;
+
+                    if (primeraImagen != null)
                     {
-                        bitmap = new BitmapImage(new Uri(rutaImagen));
-                        MonitorDeSalida.Source = bitmap;
-                        proyeccionWindow.MostrarImagenTexto(bitmap);
-                        TxtInfoMedia.Text = "Reproduciendo: Texto del Año";
+                        var monitor = FindControl<Image>("MonitorDeSalida");
+                        if (monitor != null) monitor.Source = primeraImagen;
+
+                        // Mostrar en la ventana de proyección aunque _isProjecting sea false,
+                        // el usuario puede activar proyección con el botón ON/OFF.
+                        proyeccionWindow?.MostrarImagenTexto(primeraImagen);
+
+                        var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                        if (txtInfo != null) txtInfo.Text = $"Primera imagen EPUB mostrada. Total de imágenes: {_epubImages.Count}";
                     }
-                    catch (Exception)
-                    {
-                        MonitorDeSalida.Source = null;
-                        proyeccionWindow.MostrarImagenTexto(null);
-                        TxtInfoMedia.Text = "Reproduciendo: Ninguno";
-                    }
+
+                    AgruparImagenesPorSeccion();
+                    MostrarImagenesEnPanelDinamico();
+
+                    LlenarListaProgramaDesdeTexto(
+                        $"EPUB cargado: {epubBook.Title}\nImágenes: {_epubImages.Count}\nAudio: {audioCount}"
+                    );
+
+                    MessageBox.Show(
+                        $"EPUB '{epubBook.Title}' cargado exitosamente. Imágenes: {_epubImages.Count}, Audio: {audioCount}",
+                        "Carga Completa", MessageBoxButton.OK, MessageBoxImage.Information
+                    );
                 }
                 else
                 {
-                    MonitorDeSalida.Source = null;
-                    proyeccionWindow.MostrarImagenTexto(null);
-                    TxtInfoMedia.Text = "Reproduciendo: Ninguno";
+                    string fileContent = File.ReadAllText(rutaArchivo);
+                    LlenarListaProgramaDesdeTexto("Contenido cargado desde archivo:\n" +
+                        fileContent.Substring(0, Math.Min(500, fileContent.Length)) + "...");
+                    var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                    if (txtInfo != null) txtInfo.Text = $"Programa cargado (Offline) desde archivo: {Path.GetFileName(rutaArchivo)}";
+                    MessageBox.Show($"Guía Semanal '{Path.GetFileName(rutaArchivo)}' cargada exitosamente. (Modo Offline)", "Carga Completa", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Mostrar información completa del error para depuración
+                MessageBox.Show($"Error al cargar o leer el archivo:\n{ex}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                if (txtInfo != null) txtInfo.Text = $"Error: {ex.Message}";
+            }
+        }
+
+        // -------------------- MÉTODOS AUXILIARES --------------------
+
+        private BitmapImage? CargarImagenesEPUB(EpubBook epubBook)
+        {
+            BitmapImage? primeraImagen = null;
+
+            if (epubBook?.Content?.Images?.Local == null) return null;
+
+            foreach (var imgFile in epubBook.Content.Images.Local)
+            {
+                try
+                {
+                    var bitmap = new BitmapImage();
+                    using (var ms = new MemoryStream(imgFile.Content))
+                    {
+                        bitmap.BeginInit();
+                        bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                        bitmap.StreamSource = ms;
+                        bitmap.EndInit();
+                        bitmap.Freeze();
+                    }
+
+                    _epubImages.Add(bitmap);
+
+                    if (primeraImagen == null)
+                        primeraImagen = bitmap;
+                }
+                catch
+                {
+                    // Si alguna imagen falla, continuar con las restantes
+                }
+            }
+
+            // Ordenar todas las imágenes en orden descendente por resolución (mayor a menor)
+            _epubImages = _epubImages
+                .OrderByDescending(b => (long)b.PixelWidth * b.PixelHeight)
+                .ToList();
+
+            return _epubImages.FirstOrDefault();
+        }
+
+        private void AgruparImagenesPorSeccion()
+        {
+            _gruposImagenes.Clear();
+
+            _gruposImagenes.Add(new GrupoImagenes
+            {
+                TituloPestana = "📚 Todas las Imágenes (Introducción)",
+                Imagenes = _epubImages.ToList(),
+                EsIntroduccion = true
+            });
+
+            int imagesPerGroup = 5;
+            int imageIndex = 0;
+            int groupNumber = 1;
+
+            while (imageIndex < _epubImages.Count)
+            {
+                _gruposImagenes.Add(new GrupoImagenes
+                {
+                    TituloPestana = $"Punto {groupNumber}",
+                    Imagenes = _epubImages.Skip(imageIndex).Take(imagesPerGroup).ToList()
+                });
+
+                imageIndex += imagesPerGroup;
+                groupNumber++;
+            }
+        }
+
+        private void MostrarImagenesEnPanelDinamico()
+        {
+            var tabControl = FindControl<TabControl>("TabControlImagenes");
+            if (tabControl == null) return;
+
+            tabControl.Items.Clear();
+
+            // Intentar obtener el DataTemplate definido en XAML; si no existe, crear uno en tiempo de ejecución.
+            DataTemplate itemTemplate = this.TryFindResource("ImageItemDataTemplate") as DataTemplate;
+            if (itemTemplate == null)
+            {
+                var factoryImg = new FrameworkElementFactory(typeof(Image));
+                factoryImg.SetBinding(Image.SourceProperty, new System.Windows.Data.Binding()); // binding directo al objeto (BitmapImage)
+                factoryImg.SetValue(FrameworkElement.WidthProperty, 80.0);
+                factoryImg.SetValue(FrameworkElement.HeightProperty, 80.0);
+                factoryImg.SetValue(Image.StretchProperty, Stretch.UniformToFill);
+                factoryImg.SetValue(FrameworkElement.MarginProperty, new Thickness(4));
+                factoryImg.SetValue(Image.CursorProperty, System.Windows.Input.Cursors.Hand);
+
+                itemTemplate = new DataTemplate
+                {
+                    VisualTree = factoryImg
+                };
+            }
+
+            const int pageSize = 20; // miniaturas por página
+
+            for (int g = 0; g < _gruposImagenes.Count; g++)
+            {
+                var grupo = _gruposImagenes[g];
+
+                // Asegurarse de que las miniaturas estén ordenadas descendente por resolución
+                var orderedImages = grupo.Imagenes
+                    .OrderByDescending(b => (long)b.PixelWidth * b.PixelHeight)
+                    .ToList();
+
+                // Paginación: calcular número de páginas
+                int totalPages = Math.Max(1, (int)Math.Ceiling((double)orderedImages.Count / pageSize));
+                int currentPage = 0; // captura local para cada grupo
+
+                // ListBox que mostrará la página actual
+                var listBox = new ListBox
+                {
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    ItemTemplate = itemTemplate,
+                    SelectionMode = SelectionMode.Single
+                };
+
+                // ItemsPanel: apilar verticalmente (una columna, desplazamiento arriba/abajo)
+                var stackPanelTemplate = new ItemsPanelTemplate();
+                var factoryPanel = new FrameworkElementFactory(typeof(StackPanel));
+                factoryPanel.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
+                stackPanelTemplate.VisualTree = factoryPanel;
+                listBox.ItemsPanel = stackPanelTemplate;
+
+                // Método local para actualizar el ItemsSource según la página actual
+                void UpdatePage()
+                {
+                    var pageItems = orderedImages.Skip(currentPage * pageSize).Take(pageSize).ToList();
+                    listBox.ItemsSource = pageItems;
+                }
+
+                // Inicializar página 0
+                UpdatePage();
+
+                // SINGLE-CLICK -> vista previa (no proyectar)
+                listBox.SelectionChanged += ListBoxImagenes_PreviewSelectionChanged;
+
+                // DOBLE-CLICK -> proyectar (ya implementado)
+                listBox.MouseDoubleClick += ListBoxImagenes_MouseDoubleClick;
+
+                // Controles de paginación (Prev / PageInfo / Next)
+                var prevBtn = new Button { Content = "◀", Width = 30, Height = 26, Margin = new Thickness(4) };
+                var nextBtn = new Button { Content = "▶", Width = 30, Height = 26, Margin = new Thickness(4) };
+                var pageInfo = new TextBlock
+                {
+                    Text = $"{currentPage + 1}/{totalPages}",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(8, 0, 8, 0),
+                    Foreground = Brushes.Black
+                };
+
+                prevBtn.Click += (s, e) =>
+                {
+                    if (currentPage > 0)
+                    {
+                        currentPage--;
+                        UpdatePage();
+                        pageInfo.Text = $"{currentPage + 1}/{totalPages}";
+                    }
+                };
+
+                nextBtn.Click += (s, e) =>
+                {
+                    if (currentPage < totalPages - 1)
+                    {
+                        currentPage++;
+                        UpdatePage();
+                        pageInfo.Text = $"{currentPage + 1}/{totalPages}";
+                    }
+                };
+
+                // Construir contenido del tab: una Grid con ListBox (fila 0) y paginador (fila 1)
+                var grid = new Grid();
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                // No envolver en ScrollViewer manual: dejar que el ListBox maneje el scroll vertical
+                listBox.VerticalContentAlignment = VerticalAlignment.Top;
+                Grid.SetRow(listBox, 0);
+                grid.Children.Add(listBox);
+
+                var pagerPanel = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 6, 0, 6)
+                };
+                pagerPanel.Children.Add(prevBtn);
+                pagerPanel.Children.Add(pageInfo);
+                pagerPanel.Children.Add(nextBtn);
+                Grid.SetRow(pagerPanel, 1);
+                grid.Children.Add(pagerPanel);
+
+                var tabItem = new TabItem
+                {
+                    Header = grupo.TituloPestana,
+                    Foreground = Brushes.Black,
+                    Padding = new Thickness(10, 5, 10, 5),
+                    Content = grid
+                };
+
+                tabControl.Items.Add(tabItem);
+            }
+
+            if (tabControl.Items.Count > 0)
+                tabControl.SelectedIndex = 0;
+        }
+
+        // SINGLE-CLICK preview: muestra en PreviewImage sin proyectar
+        private void ListBoxImagenes_PreviewSelectionChanged(object? sender, SelectionChangedEventArgs e)
+        {
+            var listBox = sender as ListBox;
+            if (listBox?.SelectedItem is BitmapImage selectedImage)
+            {
+                var preview = FindControl<Image>("PreviewImage");
+                if (preview != null)
+                    preview.Source = selectedImage;
+
+                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                if (txtInfo != null) txtInfo.Text = "Vista previa: imagen seleccionada (single-click)";
+            }
+        }
+
+        // DOBLE-CLICK: proyectar en ventana externa (mantener)
+        private void ListBoxImagenes_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var listBox = sender as ListBox;
+            if (listBox?.SelectedItem is BitmapImage selectedImage)
+            {
+                var monitor = FindControl<Image>("MonitorDeSalida");
+                if (monitor != null) monitor.Source = selectedImage;
+
+                // Mostrar en la ventana de proyección (si existe)
+                if (proyeccionWindow != null)
+                {
+                    proyeccionWindow.MostrarImagenTexto(selectedImage);
+
+                    if (_isProjecting)
+                    {
+                        proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+                        if (proyeccionWindow.WindowState == WindowState.Minimized)
+                            proyeccionWindow.WindowState = WindowState.Normal;
+                        proyeccionWindow.Show();
+                    }
+                }
+
+                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                if (txtInfo != null) txtInfo.Text = "Reproduciendo: Imagen seleccionada del EPUB (doble click)";
+            }
+        }
+
+        // SldVolume -> controla volumen del MediaElement en ProyeccionWindow
+        private void SldVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (proyeccionWindow != null)
+            {
+                double vol = (SldVolume?.Value ?? 75) / 100.0;
+                try { proyeccionWindow.SetVolume(vol); } catch { }
+            }
+        }
+
+        private void LlenarListaProgramaDesdeTexto(string textoPrograma)
+        {
+            var lista = FindControl<ListBox>("ListaPrograma");
+            if (lista == null) return;
+
+            lista.Items.Clear();
+            string[] lineas = textoPrograma.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var linea in lineas)
+            {
+                if (linea.Length < 5 || linea.Contains("=")) continue;
+
+                if (linea.Contains("Cántico") || linea.Contains("Oración") || linea.Contains("Video") || linea.Contains("Tesoros"))
+                    lista.Items.Add(new TextBlock { Text = linea.Trim(), Foreground = Brushes.Gold, FontWeight = FontWeights.Bold });
+                else
+                    lista.Items.Add(new TextBlock { Text = linea.Trim(), Margin = new Thickness(5, 0, 0, 0) });
+            }
+        }
+
+        private void LlenarListaProgramaDesdeError(string mensajeError)
+        {
+            var lista = FindControl<ListBox>("ListaPrograma");
+            if (lista == null) return;
+
+            lista.Items.Clear();
+            lista.Items.Add(new TextBlock { Text = mensajeError, Foreground = Brushes.Red, FontWeight = FontWeights.Bold });
+            lista.Items.Add(new TextBlock { Text = "Por favor, verifica tu conexión o usa 'Cargar Archivo' para modo Offline.", Margin = new Thickness(5, 5, 0, 0) });
+        }
+
+        private void BtnAjustes_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var ajustes = new AjustesWindow
+                {
+                    Owner = this,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner
+                };
+
+                // Mostrar modal; el usuario guarda o cierra
+                ajustes.ShowDialog();
+
+                // Al cerrar, aplicar cambios relacionados (ej. monitor de salida)
+                if (proyeccionWindow != null)
+                {
+                    proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"No se pudo abrir la ventana de Ajustes: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void BtnProyectarHDMI_Click(object sender, RoutedEventArgs e)
+        {
+            var btn = FindControl<Button>("BtnProyectarHDMI");
+            if (btn == null) return;
+
+            if (!_isProjecting)
+            {
+                // Activar proyección
+                _isProjecting = true;
+                btn.Content = "PROYECTAR ON/OFF (ON)";
+
+                if (proyeccionWindow != null)
+                {
+                    proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+                    proyeccionWindow.Show();
+
+                    // Si hay una imagen seleccionada en el panel de imágenes, usarla
+                    var tabControl = FindControl<TabControl>("TabControlImagenes");
+                    if (tabControl != null && tabControl.SelectedItem is TabItem ti &&
+                        ti.Content is Grid grid && grid.Children.OfType<ScrollViewer>().FirstOrDefault() is ScrollViewer sview &&
+                        sview.Content is ListBox lb && lb.SelectedItem is BitmapImage sel)
+                    {
+                        proyeccionWindow.MostrarImagenTexto(sel);
+                    }
+                    else
+                    {
+                        // Si no, si existe imagen de "TextoAnio" en ajustes, mostrarla
+                        if (!string.IsNullOrWhiteSpace(Settings.Default.ImagenTextoAnio))
+                        {
+                            var img = LoadBitmapFromFile(Settings.Default.ImagenTextoAnio);
+                            if (img != null) proyeccionWindow.MostrarImagenTexto(img);
+                        }
+                    }
                 }
             }
             else
             {
-                proyeccionWindow.Hide();
-                BtnProyectarHDMI.Content = "PROYECTAR ON/OFF (OFF)";
-                BtnProyectarHDMI.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0x8C, 0x00)); // Naranja
-
-                MonitorDeSalida.Source = null;
-                proyeccionWindow.MostrarImagenTexto(null);
-                TxtInfoMedia.Text = "Reproduciendo: Ninguno";
+                // Desactivar proyección
+                _isProjecting = false;
+                btn.Content = "PROYECTAR ON/OFF (OFF)";
+                if (proyeccionWindow != null)
+                {
+                    // Ocultar en lugar de cerrar para poder reutilizar la instancia
+                    proyeccionWindow.Hide();
+                }
             }
         }
 
-        // 🌟 PASO 4 IMPLEMENTADO 🌟
-
-        private void BtnCargarArchivo_Click(object sender, RoutedEventArgs e)
+        private void BtnTextoDelAnio_Click(object sender, RoutedEventArgs e)
         {
-            // Solución CS0104: Usar el nombre completo para evitar ambigüedad
-            Microsoft.Win32.OpenFileDialog openFileDialog = new Microsoft.Win32.OpenFileDialog
+            // Intentar mostrar la imagen configurada en Ajustes
+            if (!string.IsNullOrWhiteSpace(Settings.Default.ImagenTextoAnio) && File.Exists(Settings.Default.ImagenTextoAnio))
             {
-                Filter = "Archivos EPUB/HTML (*.epub;*.html;*.htm)|*.epub;*.html;*.htm"
-            }; // Solución IDE0017: Inicialización simplificada
+                var img = LoadBitmapFromFile(Settings.Default.ImagenTextoAnio);
+                if (img != null)
+                {
+                    var monitor = FindControl<Image>("MonitorDeSalida");
+                    if (monitor != null) monitor.Source = img;
 
-            if (openFileDialog.ShowDialog() == true)
+                    if (proyeccionWindow != null)
+                    {
+                        proyeccionWindow.MostrarImagenTexto(img);
+                        // Asegurar que la ventana de proyección esté visible en el monitor seleccionado
+                        proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+                        proyeccionWindow.Show();
+                        _isProjecting = true;
+
+                        var btn = FindControl<Button>("BtnProyectarHDMI");
+                        if (btn != null) btn.Content = "PROYECTAR ON/OFF (ON)";
+                    }
+
+                    return;
+                }
+            }
+
+            MessageBox.Show("No hay imagen de 'Texto del año' configurada o no se encontró el archivo.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void ListaPrograma_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            // lógica opcional
+        }
+
+        private void ListaPrograma_Drop(object sender, DragEventArgs e)
+        {
+            // lógica opcional
+        }
+
+        private void BtnAsociarMedia_Click(object sender, RoutedEventArgs e)
+        {
+            // Abrir diálogo para seleccionar video (mp4, mkv, etc.)
+            var dlg = new Microsoft.Win32.OpenFileDialog
             {
-                string rutaArchivo = openFileDialog.FileName;
+                Filter = "Videos (*.mp4;*.mkv;*.wmv;*.avi)|*.mp4;*.mkv;*.wmv;*.avi",
+                Multiselect = false
+            };
+            if (dlg.ShowDialog() != true) return;
 
+            string ruta = dlg.FileName;
+            if (proyeccionWindow != null)
+            {
                 try
                 {
-                    if (Path.GetExtension(rutaArchivo).Equals(".epub", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Procesar EPUB
-                        var epubBook = VersOne.Epub.EpubReader.ReadBook(rutaArchivo);
-
-                        // Extraer imágenes
-                        var imagenes = epubBook.Content.Images.Local;
-                        int contador = 1;
-                        foreach (var img in imagenes)
-                        {
-                            // Guardar cada imagen en disco temporalmente (puedes cambiar la ruta)
-                            string tempPath = Path.Combine(Path.GetTempPath(), $"epub_img_{contador}.jpg");
-                            File.WriteAllBytes(tempPath, img.Content);
-
-                            // Mostrar la primera imagen como ejemplo
-                            if (contador == 1)
-                            {
-                                BitmapImage bitmap = new BitmapImage(new Uri(tempPath));
-                                MonitorDeSalida.Source = bitmap;
-                                proyeccionWindow.MostrarImagenTexto(bitmap);
-                                TxtInfoMedia.Text = $"Imagen EPUB mostrada: {img.Key}";
-                            }
-                            contador++;
-                        }
-
-                        // Extraer archivos multimedia (audio)
-                        var audioFiles = epubBook.Content.Audio.Local
-                            .Where(static f =>
-                                f.ContentType == EpubContentType.AUDIO_MP3 ||
-                                f.ContentType == EpubContentType.AUDIO_MP4 ||
-                                f.ContentType == EpubContentType.AUDIO_OGG);
-                        int audioCount = audioFiles.Count();
-
-                        // Si tu versión de VersOne.Epub no tiene Video, solo procesa audio.
-                        // Si tienes Video, puedes agregarlo de forma similar:
-                        // var videoFiles = epubBook.Content.Video.Local.Values
-                        //     .Where(f => f.ContentType.StartsWith("video"));
-                        // int videoCount = videoFiles.Count();
-
-                        // Mostrar resumen en la lista
-                        LlenarListaProgramaDesdeTexto($"EPUB cargado: {epubBook.Title}\nImágenes encontradas: {imagenes.Count()}\nAudio: {audioCount}");
-                        System.Windows.MessageBox.Show($"EPUB '{epubBook.Title}' cargado exitosamente.", "Carga Completa", MessageBoxButton.OK, MessageBoxImage.Information);
-                    }
-                    else
-                    {
-                        // Procesar HTML/HTM como antes
-                        string fileContent = File.ReadAllText(rutaArchivo);
-                        LlenarListaProgramaDesdeTexto("Contenido cargado desde archivo:\n" + fileContent.Substring(0, Math.Min(500, fileContent.Length)) + "...");
-                        HtmlAgilityPack.HtmlDocument doc = new HtmlAgilityPack.HtmlDocument();
-                        doc.LoadHtml(fileContent);
-                        string titulo = doc.DocumentNode.SelectSingleNode("//title")?.InnerText ?? "Guía Semanal (Offline)";
-                        System.Windows.MessageBox.Show($"Guía Semanal '{titulo}' cargada exitosamente. (Modo Offline - Archivo)", "Carga Completa", MessageBoxButton.OK, MessageBoxImage.Information);
-                        TxtInfoMedia.Text = $"Programa cargado (Offline) desde archivo: {Path.GetFileName(rutaArchivo)}";
-                    }
+                    proyeccionWindow.MostrarVideo(ruta);
+                    // Mostrar también en el monitor pequeño si desea previsualizar
+                    var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                    if (txtInfo != null) txtInfo.Text = $"Video cargado: {Path.GetFileName(ruta)}";
                 }
                 catch (Exception ex)
                 {
-                    System.Windows.MessageBox.Show($"Error al cargar o leer el archivo: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"No se pudo cargar el video: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
 
+        // -------------------- Helpers --------------------
 
-        // 🌟 NUEVO MÉTODO AUXILIAR 1: Llenado de programa a partir del texto procesado 🌟
-        private void LlenarListaProgramaDesdeTexto(string textoPrograma)
+        private BitmapImage? LoadBitmapFromFile(string path)
         {
-            ListaPrograma.Items.Clear();
-
-            // Dividir el texto en líneas para simular ítems de la lista
-            string[] lineas = textoPrograma.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-
-            // Simulación simple de elementos
-            foreach (var linea in lineas)
+            try
             {
-                // Si la línea es muy corta (ej. un separador), ignorar o aplicar un formato
-                if (linea.Length < 5 || linea.Contains("="))
+                if (File.Exists(path))
                 {
-                    continue;
-                }
-
-                // Asignar un formato simple basado en el contenido
-                if (linea.Contains("Cántico") || linea.Contains("Oración") || linea.Contains("Video") || linea.Contains("Tesoros"))
-                {
-                    ListaPrograma.Items.Add(new TextBlock { Text = linea.Trim(), Foreground = System.Windows.Media.Brushes.Gold, FontWeight = FontWeights.Bold });
-                }
-                else
-                {
-                    ListaPrograma.Items.Add(new TextBlock { Text = linea.Trim(), Margin = new Thickness(5, 0, 0, 0) });
+                    var bitmap = new BitmapImage();
+                    using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    {
+                        bitmap.BeginInit();
+                        bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                        bitmap.StreamSource = fs;
+                        bitmap.EndInit();
+                        bitmap.Freeze();
+                    }
+                    return bitmap;
                 }
             }
+            catch
+            {
+                // ignorar error en carga de imagen
+            }
+            return null;
         }
-
-        // 🌟 NUEVO MÉTODO AUXILIAR 2: Llenado de programa con el mensaje de error 🌟
-        private void LlenarListaProgramaDesdeError(string mensajeError)
-        {
-            ListaPrograma.Items.Clear();
-            ListaPrograma.Items.Add(new TextBlock { Text = mensajeError, Foreground = System.Windows.Media.Brushes.Red, FontWeight = FontWeights.Bold });
-            ListaPrograma.Items.Add(new TextBlock { Text = "Por favor, verifica tu conexión a Internet o usa el botón 'Cargar Archivo' para el modo Offline.", Margin = new Thickness(5, 5, 0, 0) });
-        }
-
-
-        // --- Métodos pendientes (stubs) ---
-        private void BtnSemanaAnterior_Click(object sender, RoutedEventArgs e) { }
-        private void CboSemanas_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
-        private void BtnSemanaSiguiente_Click(object sender, RoutedEventArgs e) { }
-        private void BtnAsociarMedia_Click(object sender, RoutedEventArgs e) { }
-        private void ListaPrograma_Drop(object sender, System.Windows.DragEventArgs e) { }
-        private void ListaPrograma_MouseDoubleClick(object sender, MouseButtonEventArgs e) { }
     }
 }
+
+
+
+

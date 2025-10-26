@@ -18,9 +18,25 @@ namespace TMRJW
         private bool _isPanning = false;
         private bool _isPlayingVideo = false;
 
+        // Exponer estado público para que MainWindow pueda consultar/alternar
+        public bool IsPlayingVideo => _isPlayingVideo;
+
         public ProyeccionWindow()
         {
             InitializeComponent();
+
+            // Ocultar controles para que la ventana proyectada solo muestre la imagen/video sin superposiciones
+            try
+            {
+                if (BtnPlayPause != null) BtnPlayPause.Visibility = Visibility.Collapsed;
+                if (BtnStop != null) BtnStop.Visibility = Visibility.Collapsed;
+                if (VolumeSlider != null) VolumeSlider.Visibility = Visibility.Collapsed;
+
+                // Desactivar interacción directa sobre la imagen en la ventana de proyección
+                if (imageDisplay != null) imageDisplay.IsHitTestVisible = false;
+                if (LayoutRoot != null) LayoutRoot.IsHitTestVisible = false;
+            }
+            catch { }
 
             // Asegurar que el Image use las transformaciones que definimos en XAML
             if (imageDisplay != null)
@@ -250,6 +266,23 @@ namespace TMRJW
                 if (mediaElement != null) mediaElement.Volume = (VolumeSlider?.Value ?? 75) / 100.0;
             }
             catch { }
+        }
+
+        // Añadir método público para que MainWindow pueda actualizar transformaciones de la imagen proyectada
+        public void UpdateImageTransform(double scale, double offsetX, double offsetY)
+        {
+            // Ejecutar en dispatcher por seguridad de hilos y para evitar excepciones UI
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    ScaleTransform.ScaleX = scale;
+                    ScaleTransform.ScaleY = scale;
+                    TranslateTransform.X = offsetX;
+                    TranslateTransform.Y = offsetY;
+                }
+                catch { }
+            });
         }
     }
 }

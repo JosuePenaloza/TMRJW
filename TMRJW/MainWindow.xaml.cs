@@ -13,7 +13,6 @@ using VersOne.Epub;
 using System.Windows.Input; // añadido
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
-using System.Windows; // ya existe
 
 namespace TMRJW
 {
@@ -43,6 +42,7 @@ namespace TMRJW
 
         // Añadir campo para columnas de miniaturas
         private int _thumbsPerRow = 3; // por defecto 3 por fila
+        private object? vi;
 
         public MainWindow()
         {
@@ -141,8 +141,8 @@ namespace TMRJW
                     string fileContent = File.ReadAllText(rutaArchivo);
                     LlenarListaProgramaDesdeTexto("Contenido cargado desde archivo:\n" +
                         fileContent.Substring(0, Math.Min(500, fileContent.Length)) + "...");
-                    var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                    if (txtInfo != null) txtInfo.Text = $"Programa cargado (Offline) desde archivo: {Path.GetFileName(rutaArchivo)}";
+                    //                     var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+                    //                     if (txtInfo != null) txtInfo.Text = $"Programa cargado (Offline) desde archivo: {Path.GetFileName(rutaArchivo)}";
                     MessageBox.Show($"Guía Semanal '{Path.GetFileName(rutaArchivo)}' cargada exitosamente. (Modo Offline)", "Carga Completa", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
@@ -337,55 +337,6 @@ namespace TMRJW
 
             if (tabControl.Items.Count > 0)
                 tabControl.SelectedIndex = 0;
-        }
-
-        // Reemplaza el método UpdateWrapPanelItemSize por esta versión más precisa y responsiva.
-        private void UpdateWrapPanelItemSize(ListBox listBox)
-        {
-            if (listBox == null) return;
-
-            // Encontrar el WrapPanel dentro del ListBox visualmente
-            var wrap = FindVisualChild<WrapPanel>(listBox);
-            if (wrap == null) return;
-
-            // Anchura disponible para las miniaturas dentro del ListBox (restar scrollbar y padding)
-            double availableWidth = listBox.ActualWidth;
-            if (availableWidth <= 0)
-            {
-                availableWidth = Math.Max(200, this.ActualWidth - 320);
-            }
-
-            // Restar espacio para la barra de desplazamiento vertical si aparece
-            double scrollbarWidth = SystemParameters.VerticalScrollBarWidth;
-            availableWidth = Math.Max(0, availableWidth - scrollbarWidth - listBox.Padding.Left - listBox.Padding.Right - 8);
-
-            // Configuración ajustable: ancho mínimo deseado por miniatura y máxima columnas
-            const double minThumbWidth = 140.0;   // ancho mínimo confortable por thumbnail
-            const int maxCols = 3;
-
-            // Calcular número de columnas disponible (responsivo)
-            int cols = Math.Min(maxCols, Math.Max(1, (int)Math.Floor(availableWidth / minThumbWidth)));
-            if (cols < 1) cols = 1;
-
-            // Espacio entre items (margen incluido)
-            double spacing = 12.0;
-
-            // Calcular tamaño por celda usando las columnas decididas
-            double itemWidth = Math.Floor((availableWidth - (cols - 1) * spacing) / cols);
-            if (itemWidth < 80) itemWidth = 80; // mínimo razonable
-            // Mantener proporción aproximada 16:10 (puedes ajustar)
-            double itemHeight = Math.Floor(itemWidth * 100.0 / 160.0);
-
-            // Aplicar a WrapPanel (protegido por try por si aún no está listo visualmente)
-            try
-            {
-                wrap.ItemWidth = itemWidth;
-                wrap.ItemHeight = itemHeight;
-            }
-            catch
-            {
-                // ignorar fallos menores
-            }
         }
 
         // Helper para buscar control visual hijo de tipo T
@@ -713,11 +664,104 @@ namespace TMRJW
 
             // FORZAR actualización del tamaño de thumbnails
             UpdateWrapPanelItemSize(listaVideos); // <-- listaVideos ahora está definido correctamente
+
+            // Seleccionar automáticamente el primer vídeo añadido (muestra los controles multimedia)
+            if (listaVideos.SelectedItem == null)
+            {
+                listaVideos.SelectedItem = vi;
+            }
         }
 
-        private void UpdateWrapPanelItemSize(object listaVideos)
+        // Añade estos métodos al final de la clase MainWindow (o integra en la sección correspondiente).
+
+        // Handler del botón 'X' para eliminar el vídeo de la lista
+        private void BtnDeleteVideo_Click(object sender, RoutedEventArgs e)
         {
-            throw new NotImplementedException();
+            if (sender is not Button btn) return;
+            if (btn.DataContext is not VideoItem vi) return;
+
+            // Confirmación opcional
+            var res = MessageBox.Show($"¿Eliminar el vídeo '{vi.FileName}' de la lista?", "Eliminar vídeo", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (res != MessageBoxResult.Yes) return;
+
+            // Eliminar de la lista interna
+            try
+            {
+                _videos.RemoveAll(v => string.Equals(v.FilePath, vi.FilePath, StringComparison.OrdinalIgnoreCase));
+            }
+            catch { /* ignorar */ }
+
+            // Eliminar del ListBox UI si existe
+            var listaVideos = FindControl<ListBox>("ListaVideos");
+            if (listaVideos != null)
+            {
+                // Buscar el item por referencia o por FilePath
+                object? found = null;
+                foreach (var item in listaVideos.Items)
+                {
+                    if (item is VideoItem v && string.Equals(v.FilePath, vi.FilePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = item;
+                        break;
+                    }
+                }
+                if (found != null) listaVideos.Items.Remove(found);
+
+                // Forzar recálculo del layout/responsive
+                UpdateWrapPanelItemSize(listaVideos);
+            }
+
+            // Actualizar lista de programa (si se añadió una entrada) — opcional: buscar y borrar el TextBlock que coincide con el nombre
+            var listaPrograma = FindControl<ListBox>("ListaPrograma");
+            if (listaPrograma != null)
+            {
+                TextBlock? toRemove = null;
+                foreach (var item in listaPrograma.Items)
+                {
+                    if (item is TextBlock tb && tb.Text.Contains(vi.FileName))
+                    {
+                        toRemove = tb;
+                        break;
+                    }
+                }
+                if (toRemove != null) listaPrograma.Items.Remove(toRemove);
+            }
+        }
+
+        // Implementación de UpdateWrapPanelItemSize(ListBox) (reemplaza el stub que lanzó NotImplementedException)
+        private void UpdateWrapPanelItemSize(ListBox listBox)
+        {
+            if (listBox == null) return;
+
+            var wrap = FindVisualChild<WrapPanel>(listBox);
+            if (wrap == null) return;
+
+            double availableWidth = listBox.ActualWidth;
+            if (availableWidth <= 0) availableWidth = Math.Max(200, this.ActualWidth - 320);
+
+            double scrollbarWidth = SystemParameters.VerticalScrollBarWidth;
+            availableWidth = Math.Max(0, availableWidth - scrollbarWidth - listBox.Padding.Left - listBox.Padding.Right - 8);
+
+            const double minThumbWidth = 140.0;
+            const int maxCols = 3;
+
+            int cols = Math.Min(maxCols, Math.Max(1, (int)Math.Floor(availableWidth / minThumbWidth)));
+            if (cols < 1) cols = 1;
+
+            double spacing = 12.0;
+            double itemWidth = Math.Floor((availableWidth - (cols - 1) * spacing) / cols);
+            if (itemWidth < 80) itemWidth = 80;
+            double itemHeight = Math.Floor(itemWidth * 90.0 / 160.0); // relación ancho:alto para miniaturas de vídeo
+
+            try
+            {
+                wrap.ItemWidth = itemWidth;
+                wrap.ItemHeight = itemHeight;
+            }
+            catch
+            {
+                // ignorar
+            }
         }
 
         // -------------------- Helpers --------------------

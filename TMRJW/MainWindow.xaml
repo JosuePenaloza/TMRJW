@@ -37,12 +37,12 @@
 
             <DataTemplate x:Key="ImageItemDataTemplate">
                 <Border Margin="6" Background="#2E2E2E" CornerRadius="4">
-                  <Image Source="{Binding}"
+                    <Image Source="{Binding}"
                          Stretch="UniformToFill"
                          HorizontalAlignment="Stretch"
                          VerticalAlignment="Stretch" />
                 </Border>
-              </DataTemplate>
+            </DataTemplate>
 
         </Grid.Resources>
 
@@ -51,9 +51,11 @@
             <ColumnDefinition Width="0.55*" />
         </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.Column="0" Background="#363636">
+        <!-- LEFT PANEL: usar DockPanel para que los botones queden pegados abajo -->
+        <DockPanel Grid.Column="0" Background="#363636" LastChildFill="True">
 
-            <Grid Margin="10,10,10,5">
+            <!-- Header top -->
+            <Grid DockPanel.Dock="Top" Margin="10,10,10,5">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -62,13 +64,34 @@
                 <Button Grid.Column="1" x:Name="BtnAjustes" Content="⚙️ Ajustes" Height="30" Width="80" Click="BtnAjustes_Click"/>
             </Grid>
 
-            <StackPanel Orientation="Horizontal" Margin="10,5,10,10" HorizontalAlignment="Stretch">
+            <!-- Toolbar top -->
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="10,5,10,10" HorizontalAlignment="Stretch">
                 <TextBlock Text="Guía Semanal:" Foreground="White" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 <Button x:Name="BtnCargarArchivo" Content="Cargar Guía (EPUB)" Height="30" Width="130" Click="BtnCargarArchivo_Click" Margin="0,0,10,0"/>
                 <Button x:Name="BtnAsociarMedia" Content="Asociar Videos" Width="95" Click="BtnAsociarMedia_Click" Height="30" />
             </StackPanel>
 
-            <TabControl Margin="10,0,10,10" Height="300">
+            <!-- Bottom action buttons fijados al borde inferior para liberar espacio central -->
+            <StackPanel DockPanel.Dock="Bottom" Margin="10" Orientation="Vertical" VerticalAlignment="Bottom" HorizontalAlignment="Stretch" >
+                <Button x:Name="BtnTextoDelAnio" 
+                        Content="PROYECTAR TEXTO DEL AÑO" 
+                        Style="{StaticResource BotonEstiloHover}" 
+                        Background="#5D5D5D" 
+                        Foreground="White" 
+                        Height="36" 
+                        Click="BtnTextoDelAnio_Click" 
+                        Margin="0,0,0,8"/>
+                <Button x:Name="BtnProyectarHDMI" 
+                        Content="PROYECTAR ON/OFF (OFF)" 
+                        Style="{StaticResource BotonEstiloHover}" 
+                        Background="#FF8C00" 
+                        Foreground="White" 
+                        Height="44" 
+                        Click="BtnProyectarHDMI_Click"/>
+            </StackPanel>
+
+            <!-- El TabControl queda como último elemento y rellena el espacio restante -->
+            <TabControl Margin="10,0,10,10" Background="#363636">
                 <TabItem Header="📖 Programa Semanal" Foreground="Black">
                     <ListBox x:Name="ListaPrograma" 
                                  Background="#444444" 
@@ -80,85 +103,68 @@
                                  MouseDoubleClick="ListaPrograma_MouseDoubleClick" d:ItemsSource="{d:SampleData ItemCount=5}" />
                 </TabItem>
 
-                <!-- Reemplaza el TabItem "🖼️ Imágenes" por esta versión sin selector ni paginador -->
                 <TabItem Header="🖼️ Imágenes" Foreground="Black">
                     <Grid Background="#363636">
-                        <!-- Mantener solo el TabControl para las pestañas dinámicas de imágenes -->
                         <TabControl x:Name="TabControlImagenes" Background="#363636" Margin="6"/>
                     </Grid>
                 </TabItem>
 
-                <!-- Reemplaza el TabItem "🎬 Videos / 🎧 Audios" por esta versión responsive -->
                 <TabItem Header="🎬 Videos / 🎧 Audios" Foreground="Black">
                     <Grid Background="#363636">
+                        <!-- Lista de videos: ItemContainerStyle + plantilla con botón fijo a la orilla -->
                         <ListBox x:Name="ListaVideos"
-                                 Background="#2E2E2E"
-                                 Foreground="White"
-                                 BorderThickness="0"
                                  HorizontalContentAlignment="Stretch"
-                                 Margin="6"
-                                 SelectionChanged="ListaVideos_SelectionChanged"
-                                 MouseDoubleClick="ListaVideos_MouseDoubleClick"
-                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
-                            <!-- ItemsPanel: WrapPanel para permitir reflow en varias columnas -->
-                            <ListBox.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel IsItemsHost="True" Orientation="Horizontal" HorizontalAlignment="Left"/>
-                                </ItemsPanelTemplate>
-                            </ListBox.ItemsPanel>
+                                 VerticalContentAlignment="Center"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 VirtualizingStackPanel.IsVirtualizing="False"
+                                 SelectionChanged="ListaVideos_SelectionChanged">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="4"/>
+                                    <Setter Property="Margin" Value="4,6"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
 
-                            <!-- DataTemplate: miniatura + texto debajo (vertical) sin tamaños fijos -->
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Margin="6" Background="#2E2E2E" CornerRadius="4">
-                                        <StackPanel Width="Auto" Orientation="Vertical">
-                                            <Image Source="{Binding Thumbnail}"
-                                                   Stretch="UniformToFill"
-                                                   HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding FileName}" 
-                                                       Foreground="White"
-                                                       TextTrimming="CharacterEllipsis" 
-                                                       Margin="6,4,6,6"
-                                                       HorizontalAlignment="Center"
-                                                       TextAlignment="Center"
-                                                       Width="Auto"/>
-                                        </StackPanel>
-                                    </Border>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="56"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="40"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Image Source="{Binding Thumbnail}" Width="48" Height="48" Margin="4" Grid.Column="0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding FileName}" VerticalAlignment="Center" Margin="8,0" Grid.Column="1" TextTrimming="CharacterEllipsis"/>
+                                        <!-- Botón X siempre pegado a la orilla (columna final) -->
+                                        <Button Content="✖"
+                                                Width="28" Height="28"
+                                                Grid.Column="2"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                ToolTip="Eliminar vídeo"
+                                                Click="BtnDeleteVideo_Click"
+                                                Background="#FFEEEEEE"
+                                                Foreground="Black"/>
+                                    </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
                     </Grid>
                 </TabItem>
             </TabControl>
+        </DockPanel>
 
-            <Button x:Name="BtnTextoDelAnio" 
-                        Content="PROYECTAR TEXTO DEL AÑO" 
-                        Style="{StaticResource BotonEstiloHover}" 
-                        Background="#5D5D5D" 
-                        Foreground="White" 
-                        Margin="10,0,10,5" 
-                        Height="30" 
-                        Click="BtnTextoDelAnio_Click"/>
-
-            <Button x:Name="BtnProyectarHDMI" 
-                        Content="PROYECTAR ON/OFF (OFF)" 
-                        Style="{StaticResource BotonEstiloHover}" 
-                        Background="#FF8C00" 
-                        Foreground="White" 
-                        Margin="10" 
-                        Height="40" 
-                        Click="BtnProyectarHDMI_Click"/>
-
-        </StackPanel>
-
+        <!-- RIGHT PANEL (sin cambios funcionales) -->
         <Grid Grid.Column="1" Background="Black">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/> <!-- PREVIEW arriba -->
-                <RowDefinition Height="*"/>    <!-- IMAGEN GRANDE / Monitor abajo -->
+                <RowDefinition Height="Auto"/>
+                <!-- PREVIEW arriba -->
+                <RowDefinition Height="*"/>
+                <!-- IMAGEN GRANDE / Monitor abajo -->
             </Grid.RowDefinitions>
 
-            <!-- PREVIEW movida aquí (arriba) -->
             <Border Grid.Row="0" Margin="10,10,10,6" Background="#2E2E2E" CornerRadius="4" Padding="6">
                 <StackPanel>
                     <TextBlock Text="Previsualización" Foreground="#CCCCCC" FontWeight="Bold" Margin="0,0,0,6"/>
@@ -192,8 +198,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- IMAGEN GRANDE (monitor) -->
-            <Grid Grid.Row="1" ClipToBounds="True"> <!-- evitar que la imagen salga del bloque -->
+            <Grid Grid.Row="1" ClipToBounds="True">
                 <Image x:Name="MonitorDeSalida"
                        Stretch="Uniform"
                        HorizontalAlignment="Center"
@@ -214,12 +219,9 @@
                 </Image>
 
                 <StackPanel VerticalAlignment="Bottom" Margin="10" Orientation="Vertical">
-                    <!-- Info siempre visible -->
                     <TextBlock x:Name="TxtInfoMedia" Text="Reproduciendo: Ninguno" Foreground="White" Margin="0,0,0,6"/>
 
-                    <!-- Panel de controles de media: aparece cuando se selecciona un vídeo -->
                     <StackPanel x:Name="MediaControlsPanel" Orientation="Vertical" Visibility="Collapsed">
-                        <!-- Línea de tiempo -->
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,6">
                             <TextBlock x:Name="TxtCurrentTime" Text="00:00:00" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
                             <Slider x:Name="SldTimeline" Minimum="0" Maximum="1" Value="0" Width="320"
@@ -229,7 +231,6 @@
                             <TextBlock x:Name="TxtTotalTime" Text=" / 00:00:00" Foreground="White" VerticalAlignment="Center" Margin="6,0,0,0"/>
                         </StackPanel>
 
-                        <!-- Botones de reproducción, volumen -->
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Button x:Name="BtnPrev" Content="⏮" Width="36" Height="28" Click="BtnPrev_Click" Margin="0,0,6,0"/>
                             <Button x:Name="BtnPlayPause" Content="⏵" Width="36" Height="28" Click="BtnPlayPause_Click" Margin="0,0,6,0"/>
@@ -240,7 +241,6 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- Reset zoom para imagen grande: siempre visible -->
                     <Button x:Name="BtnResetZoom" Content="Reset Zoom Imagen" Width="160" Height="28" Click="BtnResetZoom_Click" Style="{StaticResource BotonEstiloHover}" Background="#5D5D5D" Margin="0,6,0,0"/>
                 </StackPanel>
             </Grid>

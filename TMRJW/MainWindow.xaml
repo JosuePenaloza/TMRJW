@@ -36,11 +36,13 @@
             </Style>
 
             <DataTemplate x:Key="ImageItemDataTemplate">
-                <Image Source="{Binding}" 
-                               Width="80" Height="80" 
-                               Stretch="UniformToFill" 
-                               Margin="4" Cursor="Hand" />
-            </DataTemplate>
+                <Border Margin="6" Background="#2E2E2E" CornerRadius="4">
+                  <Image Source="{Binding}"
+                         Stretch="UniformToFill"
+                         HorizontalAlignment="Stretch"
+                         VerticalAlignment="Stretch" />
+                </Border>
+              </DataTemplate>
 
         </Grid.Resources>
 
@@ -66,8 +68,6 @@
                 <Button x:Name="BtnAsociarMedia" Content="Asociar Videos" Width="95" Click="BtnAsociarMedia_Click" Height="30" />
             </StackPanel>
 
-            <!-- PREVIEW ORIGINAL ELIMINADO (se movió al panel derecho para evitar duplicados) -->
-
             <TabControl Margin="10,0,10,10" Height="300">
                 <TabItem Header="📖 Programa Semanal" Foreground="Black">
                     <ListBox x:Name="ListaPrograma" 
@@ -80,18 +80,54 @@
                                  MouseDoubleClick="ListaPrograma_MouseDoubleClick" d:ItemsSource="{d:SampleData ItemCount=5}" />
                 </TabItem>
 
+                <!-- Reemplaza el TabItem "🖼️ Imágenes" por esta versión sin selector ni paginador -->
                 <TabItem Header="🖼️ Imágenes" Foreground="Black">
-                    <TabControl x:Name="TabControlImagenes" Background="#363636">
-                    </TabControl>
+                    <Grid Background="#363636">
+                        <!-- Mantener solo el TabControl para las pestañas dinámicas de imágenes -->
+                        <TabControl x:Name="TabControlImagenes" Background="#363636" Margin="6"/>
+                    </Grid>
                 </TabItem>
 
+                <!-- Reemplaza el TabItem "🎬 Videos / 🎧 Audios" por esta versión responsive -->
                 <TabItem Header="🎬 Videos / 🎧 Audios" Foreground="Black">
                     <Grid Background="#363636">
-                        <TextBlock Text="Contenido de Videos y Audios irá aquí." 
-                                       Foreground="#CCCCCC" 
-                                       VerticalAlignment="Center" 
-                                       HorizontalAlignment="Center"
-                                       FontStyle="Italic"/>
+                        <ListBox x:Name="ListaVideos"
+                                 Background="#2E2E2E"
+                                 Foreground="White"
+                                 BorderThickness="0"
+                                 HorizontalContentAlignment="Stretch"
+                                 Margin="6"
+                                 SelectionChanged="ListaVideos_SelectionChanged"
+                                 MouseDoubleClick="ListaVideos_MouseDoubleClick"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <!-- ItemsPanel: WrapPanel para permitir reflow en varias columnas -->
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel IsItemsHost="True" Orientation="Horizontal" HorizontalAlignment="Left"/>
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+
+                            <!-- DataTemplate: miniatura + texto debajo (vertical) sin tamaños fijos -->
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="6" Background="#2E2E2E" CornerRadius="4">
+                                        <StackPanel Width="Auto" Orientation="Vertical">
+                                            <Image Source="{Binding Thumbnail}"
+                                                   Stretch="UniformToFill"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding FileName}" 
+                                                       Foreground="White"
+                                                       TextTrimming="CharacterEllipsis" 
+                                                       Margin="6,4,6,6"
+                                                       HorizontalAlignment="Center"
+                                                       TextAlignment="Center"
+                                                       Width="Auto"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </Grid>
                 </TabItem>
             </TabControl>
@@ -178,8 +214,34 @@
                 </Image>
 
                 <StackPanel VerticalAlignment="Bottom" Margin="10" Orientation="Vertical">
-                    <TextBlock x:Name="TxtInfoMedia" Text="Reproduciendo: Ninguno" Foreground="White" Margin="0,0,0,5"/>
-                    <Slider x:Name="SldVolume" Value="75" Minimum="0" Maximum="100" ValueChanged="SldVolume_ValueChanged"/>
+                    <!-- Info siempre visible -->
+                    <TextBlock x:Name="TxtInfoMedia" Text="Reproduciendo: Ninguno" Foreground="White" Margin="0,0,0,6"/>
+
+                    <!-- Panel de controles de media: aparece cuando se selecciona un vídeo -->
+                    <StackPanel x:Name="MediaControlsPanel" Orientation="Vertical" Visibility="Collapsed">
+                        <!-- Línea de tiempo -->
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,6">
+                            <TextBlock x:Name="TxtCurrentTime" Text="00:00:00" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <Slider x:Name="SldTimeline" Minimum="0" Maximum="1" Value="0" Width="320"
+                                    ValueChanged="SldTimeline_ValueChanged"
+                                    PreviewMouseDown="SldTimeline_PreviewMouseDown"
+                                    PreviewMouseUp="SldTimeline_PreviewMouseUp"/>
+                            <TextBlock x:Name="TxtTotalTime" Text=" / 00:00:00" Foreground="White" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                        </StackPanel>
+
+                        <!-- Botones de reproducción, volumen -->
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button x:Name="BtnPrev" Content="⏮" Width="36" Height="28" Click="BtnPrev_Click" Margin="0,0,6,0"/>
+                            <Button x:Name="BtnPlayPause" Content="⏵" Width="36" Height="28" Click="BtnPlayPause_Click" Margin="0,0,6,0"/>
+                            <Button x:Name="BtnStop" Content="⏹" Width="36" Height="28" Click="BtnStop_Click" Margin="0,0,6,0"/>
+                            <Button x:Name="BtnNext" Content="⏭" Width="36" Height="28" Click="BtnNext_Click" Margin="0,0,12,0"/>
+                            <TextBlock Text="Vol" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <Slider x:Name="SldVolume" Value="75" Minimum="0" Maximum="100" ValueChanged="SldVolume_ValueChanged" Width="120" Margin="0,0,12,0"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Reset zoom para imagen grande: siempre visible -->
+                    <Button x:Name="BtnResetZoom" Content="Reset Zoom Imagen" Width="160" Height="28" Click="BtnResetZoom_Click" Style="{StaticResource BotonEstiloHover}" Background="#5D5D5D" Margin="0,6,0,0"/>
                 </StackPanel>
             </Grid>
         </Grid>

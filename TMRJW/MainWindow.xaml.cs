@@ -13,6 +13,7 @@ using VersOne.Epub;
 using System.Windows.Input; // añadido
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
+using System.Windows; // ya existe
 
 namespace TMRJW
 {
@@ -38,6 +39,11 @@ namespace TMRJW
         private bool _isPanningMonitor = false;
         private Point _lastMonitorMousePos;
 
+        private bool _isTimelineDragging = false;
+
+        // Añadir campo para columnas de miniaturas
+        private int _thumbsPerRow = 3; // por defecto 3 por fila
+
         public MainWindow()
         {
             InitializeComponent();
@@ -45,8 +51,21 @@ namespace TMRJW
             // No mostrar inicialmente; posicionarlo en el monitor configurado cuando se active
             proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
 
-            // Asegurar que al cerrar la ventana principal cerramos la ventana de proyección
+            // Registrar cierre
             this.Closing += MainWindow_Closing;
+
+            // Registrar comportamiento responsive para ListaVideos (si existe en XAML)
+            var listaVideos = FindControl<ListBox>("ListaVideos");
+            if (listaVideos != null)
+            {
+                // asegurar que no haya scroll horizontal y que se recalculen tamaños al cargar/redimensionar
+                listaVideos.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+                listaVideos.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+                listaVideos.SetValue(VirtualizingStackPanel.IsVirtualizingProperty, false);
+
+                listaVideos.Loaded += (s, e) => UpdateWrapPanelItemSize(listaVideos);
+                listaVideos.SizeChanged += (s, e) => UpdateWrapPanelItemSize(listaVideos);
+            }
         }
 
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -217,50 +236,35 @@ namespace TMRJW
             _gruposImagenes = nuevos;
         }
 
+        // Reemplaza el método MostrarImagenesEnPanelDinamico y añade helpers para que las miniaturas sean responsivas.
+        // Quita también los handlers `CboThumbsPerRow_SelectionChanged` y `BtnRefreshThumbs_Click` del archivo (no los incluyo aquí).
+
         private void MostrarImagenesEnPanelDinamico()
         {
             var tabControl = FindControl<TabControl>("TabControlImagenes");
             if (tabControl == null) return;
 
-            // Conservar encabezado seleccionado para evitar "reordenamiento visual" al reconstruir.
             string? selectedHeader = (tabControl.SelectedItem as TabItem)?.Header?.ToString();
-
             tabControl.Items.Clear();
 
-            // Intentar obtener el DataTemplate definido en XAML; si no existe, crear uno en tiempo de ejecución.
             DataTemplate? itemTemplate = this.TryFindResource("ImageItemDataTemplate") as DataTemplate;
             if (itemTemplate == null)
             {
                 var factoryImg = new FrameworkElementFactory(typeof(Image));
-                factoryImg.SetBinding(Image.SourceProperty, new System.Windows.Data.Binding()); // binding directo al objeto (BitmapImage)
-                factoryImg.SetValue(FrameworkElement.WidthProperty, 80.0);
-                factoryImg.SetValue(FrameworkElement.HeightProperty, 80.0);
-                factoryImg.SetValue(Image.StretchProperty, Stretch.UniformToFill);
-                factoryImg.SetValue(FrameworkElement.MarginProperty, new Thickness(4));
+                factoryImg.SetBinding(Image.SourceProperty, new System.Windows.Data.Binding());
+                // No fijar tamaño rígido aquí: el WrapPanel controlará el ItemWidth dinámicamente
+                factoryImg.SetValue(Image.StretchProperty, System.Windows.Media.Stretch.UniformToFill);
+                factoryImg.SetValue(FrameworkElement.MarginProperty, new Thickness(6));
                 factoryImg.SetValue(Image.CursorProperty, System.Windows.Input.Cursors.Hand);
-
-                itemTemplate = new DataTemplate
-                {
-                    VisualTree = factoryImg
-                };
+                itemTemplate = new DataTemplate { VisualTree = factoryImg };
             }
-
-            const int pageSize = 20; // miniaturas por página
 
             for (int g = 0; g < _gruposImagenes.Count; g++)
             {
                 var grupo = _gruposImagenes[g];
+                var orderedImages = grupo.Imagenes.OrderByDescending(b => (long)b.PixelWidth * b.PixelHeight).ToList();
 
-                // Asegurarse de que las miniaturas estén ordenadas descendente por resolución
-                var orderedImages = grupo.Imagenes
-                    .OrderByDescending(b => (long)b.PixelWidth * b.PixelHeight)
-                    .ToList();
-
-                // Paginación: calcular número de páginas
-                int totalPages = Math.Max(1, (int)Math.Ceiling((double)orderedImages.Count / pageSize));
-                int currentPage = 0; // captura local para cada grupo
-
-                // ListBox que mostrará la página actual
+                // ListBox que mostrará todas las miniaturas (scroll vertical)
                 var listBox = new ListBox
                 {
                     Background = Brushes.Transparent,
@@ -269,81 +273,43 @@ namespace TMRJW
                     SelectionMode = SelectionMode.Single
                 };
 
-                // ItemsPanel: apilar verticalmente (una columna, desplazamiento arriba/abajo)
-                var stackPanelTemplate = new ItemsPanelTemplate();
-                var factoryPanel = new FrameworkElementFactory(typeof(StackPanel));
-                factoryPanel.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
-                stackPanelTemplate.VisualTree = factoryPanel;
-                listBox.ItemsPanel = stackPanelTemplate;
+                // Evitar scroll horizontal (importante para que WrapPanel haga wrap correctamente)
+                listBox.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+                listBox.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+                // Desactivar content scrolling virtualizado para evitar comportamiento extraño al redimensionar
+                listBox.SetValue(VirtualizingStackPanel.IsVirtualizingProperty, false);
 
-                // Método local para actualizar el ItemsSource según la página actual
-                void UpdatePage()
-                {
-                    var pageItems = orderedImages.Skip(currentPage * pageSize).Take(pageSize).ToList();
-                    listBox.ItemsSource = pageItems;
-                }
+                // ItemsPanel: WrapPanel sin ItemWidth fijo; lo ajustaremos en Loaded/SizeChanged
+                var itemsPanel = new ItemsPanelTemplate();
+                var panelFactory = new FrameworkElementFactory(typeof(WrapPanel));
+                panelFactory.SetValue(WrapPanel.OrientationProperty, Orientation.Horizontal);
+                panelFactory.SetValue(WrapPanel.HorizontalAlignmentProperty, HorizontalAlignment.Left);
+                itemsPanel.VisualTree = panelFactory;
+                listBox.ItemsPanel = itemsPanel;
 
-                // Inicializar página 0
-                UpdatePage();
+                // Asignar todas las miniaturas (sin paginación)
+                listBox.ItemsSource = orderedImages;
 
-                // SINGLE-CLICK -> vista previa (no proyectar)
+                // Handlers
                 listBox.SelectionChanged += ListBoxImagenes_PreviewSelectionChanged;
-
-                // DOBLE-CLICK -> proyectar (ya implementado)
                 listBox.MouseDoubleClick += ListBoxImagenes_MouseDoubleClick;
 
-                // Controles de paginación (Prev / PageInfo / Next)
-                var prevBtn = new Button { Content = "◀", Width = 30, Height = 26, Margin = new Thickness(4) };
-                var nextBtn = new Button { Content = "▶", Width = 30, Height = 26, Margin = new Thickness(4) };
-                var pageInfo = new TextBlock
+                // Después de añadir al visual tree ajustamos el tamaño de cada celda según ancho disponible
+                listBox.Loaded += (s, e) =>
                 {
-                    Text = $"{currentPage + 1}/{totalPages}",
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(8, 0, 8, 0),
-                    Foreground = Brushes.Black
+                    UpdateWrapPanelItemSize(listBox);
+                };
+                listBox.SizeChanged += (s, e) =>
+                {
+                    UpdateWrapPanelItemSize(listBox);
                 };
 
-                prevBtn.Click += (s, e) =>
-                {
-                    if (currentPage > 0)
-                    {
-                        currentPage--;
-                        UpdatePage();
-                        pageInfo.Text = $"{currentPage + 1}/{totalPages}";
-                    }
-                };
-
-                nextBtn.Click += (s, e) =>
-                {
-                    if (currentPage < totalPages - 1)
-                    {
-                        currentPage++;
-                        UpdatePage();
-                        pageInfo.Text = $"{currentPage + 1}/{totalPages}";
-                    }
-                };
-
-                // Construir contenido del tab: una Grid con ListBox (fila 0) y paginador (fila 1)
                 var grid = new Grid();
                 grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-                // No envolver en ScrollViewer manual: dejar que el ListBox maneje el scroll vertical
                 listBox.VerticalContentAlignment = VerticalAlignment.Top;
                 Grid.SetRow(listBox, 0);
                 grid.Children.Add(listBox);
-
-                var pagerPanel = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    Margin = new Thickness(0, 6, 0, 6)
-                };
-                pagerPanel.Children.Add(prevBtn);
-                pagerPanel.Children.Add(pageInfo);
-                pagerPanel.Children.Add(nextBtn);
-                Grid.SetRow(pagerPanel, 1);
-                grid.Children.Add(pagerPanel);
 
                 var tabItem = new TabItem
                 {
@@ -356,7 +322,7 @@ namespace TMRJW
                 tabControl.Items.Add(tabItem);
             }
 
-            // Restaurar la pestaña seleccionada por encabezado (si existe)
+            // Restaurar pestaña seleccionada
             if (!string.IsNullOrEmpty(selectedHeader))
             {
                 for (int i = 0; i < tabControl.Items.Count; i++)
@@ -371,6 +337,69 @@ namespace TMRJW
 
             if (tabControl.Items.Count > 0)
                 tabControl.SelectedIndex = 0;
+        }
+
+        // Reemplaza el método UpdateWrapPanelItemSize por esta versión más precisa y responsiva.
+        private void UpdateWrapPanelItemSize(ListBox listBox)
+        {
+            if (listBox == null) return;
+
+            // Encontrar el WrapPanel dentro del ListBox visualmente
+            var wrap = FindVisualChild<WrapPanel>(listBox);
+            if (wrap == null) return;
+
+            // Anchura disponible para las miniaturas dentro del ListBox (restar scrollbar y padding)
+            double availableWidth = listBox.ActualWidth;
+            if (availableWidth <= 0)
+            {
+                availableWidth = Math.Max(200, this.ActualWidth - 320);
+            }
+
+            // Restar espacio para la barra de desplazamiento vertical si aparece
+            double scrollbarWidth = SystemParameters.VerticalScrollBarWidth;
+            availableWidth = Math.Max(0, availableWidth - scrollbarWidth - listBox.Padding.Left - listBox.Padding.Right - 8);
+
+            // Configuración ajustable: ancho mínimo deseado por miniatura y máxima columnas
+            const double minThumbWidth = 140.0;   // ancho mínimo confortable por thumbnail
+            const int maxCols = 3;
+
+            // Calcular número de columnas disponible (responsivo)
+            int cols = Math.Min(maxCols, Math.Max(1, (int)Math.Floor(availableWidth / minThumbWidth)));
+            if (cols < 1) cols = 1;
+
+            // Espacio entre items (margen incluido)
+            double spacing = 12.0;
+
+            // Calcular tamaño por celda usando las columnas decididas
+            double itemWidth = Math.Floor((availableWidth - (cols - 1) * spacing) / cols);
+            if (itemWidth < 80) itemWidth = 80; // mínimo razonable
+            // Mantener proporción aproximada 16:10 (puedes ajustar)
+            double itemHeight = Math.Floor(itemWidth * 100.0 / 160.0);
+
+            // Aplicar a WrapPanel (protegido por try por si aún no está listo visualmente)
+            try
+            {
+                wrap.ItemWidth = itemWidth;
+                wrap.ItemHeight = itemHeight;
+            }
+            catch
+            {
+                // ignorar fallos menores
+            }
+        }
+
+        // Helper para buscar control visual hijo de tipo T
+        private static T? FindVisualChild<T>(DependencyObject depObj) where T : DependencyObject
+        {
+            if (depObj == null) return null;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(depObj); i++)
+            {
+                var child = VisualTreeHelper.GetChild(depObj, i);
+                if (child is T t) return t;
+                var result = FindVisualChild<T>(child);
+                if (result != null) return result;
+            }
+            return null;
         }
 
         // SINGLE-CLICK preview: muestra en PreviewImage sin proyectar
@@ -578,6 +607,8 @@ namespace TMRJW
             };
             if (dlg.ShowDialog() != true) return;
 
+            var listaVideos = FindControl<ListBox>("ListaVideos"); // <-- Añadir esta línea para definir listaVideos
+
             foreach (string ruta in dlg.FileNames)
             {
                 string ext = Path.GetExtension(ruta).ToLowerInvariant();
@@ -617,7 +648,6 @@ namespace TMRJW
                     }
 
                     // Intentar mostrar info/previsualización en UI si hay control para lista de videos
-                    var listaVideos = FindControl<ListBox>("ListaVideos");
                     if (listaVideos != null)
                     {
                         // Si no hay ItemTemplate, crear una sencilla con imagen y nombre
@@ -680,6 +710,14 @@ namespace TMRJW
                     // El video se reproducirá sólo cuando el usuario haga doble click en la lista de videos.
                 }
             }
+
+            // FORZAR actualización del tamaño de thumbnails
+            UpdateWrapPanelItemSize(listaVideos); // <-- listaVideos ahora está definido correctamente
+        }
+
+        private void UpdateWrapPanelItemSize(object listaVideos)
+        {
+            throw new NotImplementedException();
         }
 
         // -------------------- Helpers --------------------
@@ -1102,6 +1140,122 @@ namespace TMRJW
             {
                 _isPanningMonitor = false;
                 try { Mouse.Capture(null); } catch { }
+            }
+        }
+
+        private void SldTimeline_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            _isTimelineDragging = true;
+        }
+
+        private void SldTimeline_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            _isTimelineDragging = false;
+
+            // Intentar hacer seek si la ventana de proyección expone un método (no implementado aquí).
+            // Placeholder para integrar con proyeccionWindow.Seek(positionSeconds) si lo añades.
+        }
+
+        private void SldTimeline_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            // Muestra progreso simple en porcentaje mientras no haya información de duración.
+            var txtCurrent = this.FindName("TxtCurrentTime") as TextBlock;
+            if (txtCurrent != null && !_isTimelineDragging)
+            {
+                double pct = Math.Clamp(e.NewValue, 0.0, 1.0) * 100.0;
+                txtCurrent.Text = $"{Math.Round(pct)}%";
+            }
+        }
+
+        private void BtnPlayPause_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var btn = this.FindName("BtnPlayPause") as Button;
+                if (proyeccionWindow != null && proyeccionWindow.IsPlayingVideo)
+                {
+                    proyeccionWindow.PauseVideo();
+                    if (btn != null) btn.Content = "⏵";
+                }
+                else
+                {
+                    proyeccionWindow?.PlayVideo();
+                    if (btn != null) btn.Content = "⏸";
+                }
+            }
+            catch { /* ignorar errores de control */ }
+        }
+
+        private void BtnStop_Click(object sender, RoutedEventArgs e)
+        {
+            proyeccionWindow?.StopVideo();
+            var playBtn = this.FindName("BtnPlayPause") as Button;
+            if (playBtn != null) playBtn.Content = "⏵";
+            var txt = this.FindName("TxtCurrentTime") as TextBlock;
+            if (txt != null) txt.Text = "00:00:00";
+        }
+
+        private void BtnPrev_Click(object sender, RoutedEventArgs e)
+        {
+            var lista = this.FindName("ListaVideos") as ListBox;
+            if (lista == null || lista.Items.Count == 0) return;
+            int idx = lista.SelectedIndex;
+            idx = Math.Max(0, idx - 1);
+            lista.SelectedIndex = idx;
+            lista.ScrollIntoView(lista.SelectedItem);
+        }
+
+        private void BtnNext_Click(object sender, RoutedEventArgs e)
+        {
+            var lista = this.FindName("ListaVideos") as ListBox;
+            if (lista == null || lista.Items.Count == 0) return;
+            int idx = lista.SelectedIndex;
+            idx = Math.Min(lista.Items.Count - 1, (idx < 0 ? 0 : idx + 1));
+            lista.SelectedIndex = idx;
+            lista.ScrollIntoView(lista.SelectedItem);
+        }
+
+        private void BtnResetZoom_Click(object sender, RoutedEventArgs e)
+        {
+            var st = this.FindName("MonitorScaleTransform") as ScaleTransform;
+            var tt = this.FindName("MonitorTranslateTransform") as TranslateTransform;
+            if (st != null) st.ScaleX = st.ScaleY = 1;
+            if (tt != null) { tt.X = 0; tt.Y = 0; }
+
+            // También actualizar la ventana de proyección si existe
+            try { proyeccionWindow?.UpdateImageTransform(1.0, 0, 0); } catch { }
+        }
+
+        // Añade este manejador a la clase MainWindow
+        private void ListaVideos_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var lista = sender as ListBox ?? FindControl<ListBox>("ListaVideos");
+            var mediaPanel = FindControl<FrameworkElement>("MediaControlsPanel");
+            var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+            var preview = FindControl<Image>("PreviewImage");
+
+            if (lista?.SelectedItem != null)
+            {
+                // Mostrar panel de controles de media
+                if (mediaPanel != null) mediaPanel.Visibility = Visibility.Visible;
+
+                // Actualizar texto informativo
+                if (lista.SelectedItem is VideoItem vi)
+                {
+                    if (txtInfo != null) txtInfo.Text = $"Reproduciendo: {vi.FileName}";
+                    // Mostrar miniatura en preview si existe
+                    if (preview != null && vi.Thumbnail != null) preview.Source = vi.Thumbnail;
+                }
+                else
+                {
+                    if (txtInfo != null) txtInfo.Text = $"Reproduciendo: {lista.SelectedItem}";
+                }
+            }
+            else
+            {
+                // Ocultar panel si no hay selección
+                if (mediaPanel != null) mediaPanel.Visibility = Visibility.Collapsed;
+                if (txtInfo != null) txtInfo.Text = "Reproduciendo: Ninguno";
             }
         }
     }

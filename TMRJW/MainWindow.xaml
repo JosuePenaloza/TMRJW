@@ -168,7 +168,8 @@
             <Border Grid.Row="0" Margin="10,10,10,6" Background="#2E2E2E" CornerRadius="4" Padding="6">
                 <StackPanel>
                     <TextBlock Text="Previsualización" Foreground="#CCCCCC" FontWeight="Bold" Margin="0,0,0,6"/>
-                    <Grid>
+                    <!-- AÑADIDO ClipToBounds para evitar overflow del Image cuando se escala -->
+                    <Grid ClipToBounds="True">
                         <Image x:Name="PreviewImage"
                                Height="120"
                                Stretch="Uniform"

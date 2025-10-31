@@ -15,6 +15,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows.Controls.Primitives;
 
 namespace TMRJW
 {
@@ -47,12 +48,15 @@ namespace TMRJW
         private int _thumbsPerRow = 3; // por defecto 3 por fila
         private object? vi;
 
+        // Controles manuales: zoom y pan para MonitorDeSalida
+        private const double MonitorPanStep = 40.0; // píxeles por pulsación
+
         public MainWindow()
         {
             InitializeComponent();
             proyeccionWindow = new ProyeccionWindow();
             // No mostrar inicialmente; posicionarlo en el monitor configurado cuando se active
-            proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+            proyeccionWindow?.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
 
             // Registrar cierre
             this.Closing += MainWindow_Closing;
@@ -116,15 +120,13 @@ namespace TMRJW
 
                     if (primeraImagen != null)
                     {
-                        var monitor = FindControl<Image>("MonitorDeSalida");
-                        if (monitor != null) monitor.Source = primeraImagen;
+                        FindControl<Image>("MonitorDeSalida")?.SetCurrentValue(Image.SourceProperty, primeraImagen);
 
                         // Mostrar en la ventana de proyección aunque _isProjecting sea false,
                         // el usuario puede activar proyección con el botón ON/OFF.
                         proyeccionWindow?.MostrarImagenTexto(primeraImagen);
 
-                        var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                        if (txtInfo != null) txtInfo.Text = $"Primera imagen EPUB mostrada. Total de imágenes: {_epubImages.Count}";
+                        FindControl<TextBlock>("TxtInfoMedia")?.SetCurrentValue(TextBlock.TextProperty, $"Primera imagen EPUB mostrada. Total de imágenes: {_epubImages.Count}");
                     }
 
                     AgruparImagenesPorSeccion();
@@ -144,8 +146,6 @@ namespace TMRJW
                     string fileContent = File.ReadAllText(rutaArchivo);
                     LlenarListaProgramaDesdeTexto("Contenido cargado desde archivo:\n" +
                         fileContent.Substring(0, Math.Min(500, fileContent.Length)) + "...");
-                    //                     var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                    //                     if (txtInfo != null) txtInfo.Text = $"Programa cargado (Offline) desde archivo: {Path.GetFileName(rutaArchivo)}";
                     MessageBox.Show($"Guía Semanal '{Path.GetFileName(rutaArchivo)}' cargada exitosamente. (Modo Offline)", "Carga Completa", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
@@ -153,8 +153,7 @@ namespace TMRJW
             {
                 // Mostrar información completa del error para depuración
                 MessageBox.Show($"Error al cargar o leer el archivo:\n{ex}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                if (txtInfo != null) txtInfo.Text = $"Error: {ex.Message}";
+                FindControl<TextBlock>("TxtInfoMedia")?.SetCurrentValue(TextBlock.TextProperty, $"Error: {ex.Message}");
             }
         }
 
@@ -364,11 +363,9 @@ namespace TMRJW
             {
                 // Sólo actualizar la previsualización pequeña (PreviewImage).
                 // No detener ni cambiar la proyección en segunda pantalla.
-                var preview = FindControl<Image>("PreviewImage");
-                if (preview != null) preview.Source = selectedImage;
+                FindControl<Image>("PreviewImage")?.SetCurrentValue(Image.SourceProperty, selectedImage);
 
-                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                if (txtInfo != null) txtInfo.Text = "Vista previa: imagen seleccionada (single-click)";
+                FindControl<TextBlock>("TxtInfoMedia")?.SetCurrentValue(TextBlock.TextProperty, "Vista previa: imagen seleccionada (single-click)");
             }
         }
 
@@ -381,8 +378,7 @@ namespace TMRJW
                 // Mostrar en preview y monitor, detener vídeo y ocultar controles, además proyectar
                 DisplayImageAndStopVideo(selectedImage, showInProjection: true);
 
-                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                if (txtInfo != null) txtInfo.Text = "Reproduciendo: Imagen seleccionada del EPUB (doble click)";
+                FindControl<TextBlock>("TxtInfoMedia")?.SetCurrentValue(TextBlock.TextProperty, "Reproduciendo: Imagen seleccionada del EPUB (doble click)");
             }
         }
 
@@ -391,7 +387,7 @@ namespace TMRJW
         {
             if (proyeccionWindow != null)
             {
-                double vol = (SldVolume?.Value ?? 75) / 100.0;
+                double vol = (FindControl<Slider>("SldVolume")?.Value ?? 75) / 100.0;
                 try { proyeccionWindow.SetVolume(vol); } catch { }
             }
         }
@@ -439,10 +435,7 @@ namespace TMRJW
                 ajustes.ShowDialog();
 
                 // Al cerrar, aplicar cambios relacionados (ej. monitor de salida)
-                if (proyeccionWindow != null)
-                {
-                    proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
-                }
+                proyeccionWindow?.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
             }
             catch (Exception ex)
             {
@@ -459,7 +452,7 @@ namespace TMRJW
             {
                 // Activar proyección
                 _isProjecting = true;
-                btn.Content = "PROYECTAR ON/OFF (ON)";
+                btn.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (ON)");
 
                 if (proyeccionWindow != null)
                 {
@@ -477,11 +470,8 @@ namespace TMRJW
                     else
                     {
                         // Si no, si existe imagen de "TextoAnio" en ajustes, mostrarla
-                        if (!string.IsNullOrWhiteSpace(Settings.Default.ImagenTextoAnio))
-                        {
-                            var img = LoadBitmapFromFile(Settings.Default.ImagenTextoAnio);
-                            if (img != null) proyeccionWindow.MostrarImagenTexto(img);
-                        }
+                        var img = LoadBitmapFromFile(Settings.Default.ImagenTextoAnio);
+                        if (img != null) proyeccionWindow.MostrarImagenTexto(img);
                     }
                 }
             }
@@ -489,12 +479,8 @@ namespace TMRJW
             {
                 // Desactivar proyección
                 _isProjecting = false;
-                btn.Content = "PROYECTAR ON/OFF (OFF)";
-                if (proyeccionWindow != null)
-                {
-                    // Ocultar en lugar de cerrar para poder reutilizar la instancia
-                    proyeccionWindow.Hide();
-                }
+                btn.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (OFF)");
+                proyeccionWindow?.Hide();
             }
         }
 
@@ -508,7 +494,6 @@ namespace TMRJW
                 {
                     // Usar helper que detiene vídeo y proyecta la imagen
                     DisplayImageAndStopVideo(img, showInProjection: true);
-
                     return;
                 }
             }
@@ -543,8 +528,7 @@ namespace TMRJW
                         // Usar helper para previsualizar y detener cualquier vídeo activo
                         DisplayImageAndStopVideo(img, showInProjection: true);
 
-                        var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                        if (txtInfo != null) txtInfo.Text = $"Imagen cargada: {Path.GetFileName(ruta)}";
+                        FindControl<TextBlock>("TxtInfoMedia")?.SetCurrentValue(TextBlock.TextProperty, $"Imagen cargada: {Path.GetFileName(ruta)}");
                     }
                 }
                 else
@@ -558,11 +542,7 @@ namespace TMRJW
                     _videos.Add(vi);
 
                     // Agregar entrada al programa semanal (ListaPrograma)
-                    var lista = FindControl<ListBox>("ListaPrograma");
-                    if (lista != null)
-                    {
-                        lista.Items.Add(new TextBlock { Text = $"Video: {vi.FileName}", Foreground = Brushes.Gold, FontWeight = FontWeights.Bold });
-                    }
+                    FindControl<ListBox>("ListaPrograma")?.Items.Add(new TextBlock { Text = $"Video: {vi.FileName}", Foreground = Brushes.Gold, FontWeight = FontWeights.Bold });
 
                     // Intentar mostrar info/previsualización en UI si hay control para lista de videos
                     if (listaVideos != null)
@@ -620,8 +600,7 @@ namespace TMRJW
                         });
                     }
 
-                    var txtInfo2 = FindControl<TextBlock>("TxtInfoMedia");
-                    if (txtInfo2 != null) txtInfo2.Text = $"Video cargado: {vi.FileName}";
+                    FindControl<TextBlock>("TxtInfoMedia")?.SetCurrentValue(TextBlock.TextProperty, $"Video cargado: {vi.FileName}");
 
                     // NO reproducir automáticamente en la proyección.
                     // El video se reproducirá sólo cuando el usuario haga doble click en la lista de videos.
@@ -894,8 +873,7 @@ namespace TMRJW
             var lista = sender as ListBox;
             if (lista?.SelectedItem is VideoItem vi)
             {
-                var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-                if (txtInfo != null) txtInfo.Text = $"Reproduciendo video: {vi.FileName}";
+                FindControl<TextBlock>("TxtInfoMedia")?.SetCurrentValue(TextBlock.TextProperty, $"Reproduciendo video: {vi.FileName}");
 
                 if (proyeccionWindow != null)
                 {
@@ -905,7 +883,7 @@ namespace TMRJW
                         proyeccionWindow.MostrarVideo(vi.FilePath);
 
                         // Sincronizar volumen desde la UI (si existe)
-                        var volSlider = this.FindName("SldVolume") as Slider;
+                        var volSlider = FindControl<Slider>("SldVolume");
                         double vol = (volSlider?.Value ?? 75) / 100.0;
                         try { proyeccionWindow.SetVolume(vol); } catch { }
 
@@ -919,19 +897,14 @@ namespace TMRJW
                         _isProjecting = true;
 
                         // Mostrar/activar controles multimedia en la UI principal
-                        var mediaPanel = FindControl<FrameworkElement>("MediaControlsPanel");
-                        if (mediaPanel != null) mediaPanel.Visibility = Visibility.Visible;
+                        FindControl<FrameworkElement>("MediaControlsPanel")?.SetCurrentValue(FrameworkElement.VisibilityProperty, Visibility.Visible);
 
                         // Actualizar estado visual de botones/timeline
-                        var playBtn = this.FindName("BtnPlayPause") as Button;
-                        if (playBtn != null) playBtn.Content = "⏸";
-                        var txtCurrent = this.FindName("TxtCurrentTime") as TextBlock;
-                        if (txtCurrent != null) txtCurrent.Text = "00:00:00";
-                        var sld = this.FindName("SldTimeline") as Slider;
-                        if (sld != null) sld.Value = 0;
+                        FindControl<Button>("BtnPlayPause")?.SetCurrentValue(ContentProperty, "⏸");
+                        FindControl<TextBlock>("TxtCurrentTime")?.SetCurrentValue(TextBlock.TextProperty, "00:00:00");
+                        FindControl<Slider>("SldTimeline")?.SetCurrentValue(RangeBase.ValueProperty, 0.0);
 
-                        var btn = FindControl<Button>("BtnProyectarHDMI");
-                        if (btn != null) btn.Content = "PROYECTAR ON/OFF (ON)";
+                        FindControl<Button>("BtnProyectarHDMI")?.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (ON)");
                     }
                     catch
                     {
@@ -1010,12 +983,12 @@ namespace TMRJW
                 if (proyeccionWindow.IsPlayingVideo)
                 {
                     proyeccionWindow.PauseVideo();
-                    (sender as Button)!.Content = "Play";
+                    (sender as Button)!.SetCurrentValue(ContentProperty, "Play");
                 }
                 else
                 {
                     proyeccionWindow.PlayVideo();
-                    (sender as Button)!.Content = "Pause";
+                    (sender as Button)!.SetCurrentValue(ContentProperty, "Pause");
 
                     // Asegurar que la ventana de proyección esté visible en el monitor seleccionado
                     proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
@@ -1024,8 +997,7 @@ namespace TMRJW
                     proyeccionWindow.Show();
                     _isProjecting = true;
 
-                    var btn = FindControl<Button>("BtnProyectarHDMI");
-                    if (btn != null) btn.Content = "PROYECTAR ON/OFF (ON)";
+                    FindControl<Button>("BtnProyectarHDMI")?.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (ON)");
                 }
             }
             catch
@@ -1042,8 +1014,7 @@ namespace TMRJW
             {
                 proyeccionWindow.StopVideo();
 
-                var playBtn = FindControl<Button>("BtnPreviewPlayPause");
-                if (playBtn != null) playBtn.Content = "Play";
+                FindControl<Button>("BtnPreviewPlayPause")?.SetCurrentValue(ContentProperty, "Play");
             }
             catch
             {
@@ -1053,7 +1024,7 @@ namespace TMRJW
 
         private void PreviewImage_MouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if (PreviewImage == null) return;
+            if (FindControl<Image>("PreviewImage") == null) return;
 
             double oldScale = _previewScale;
             if (e.Delta > 0) _previewScale = Math.Min(PreviewMaxScale, _previewScale + PreviewScaleStep);
@@ -1061,14 +1032,20 @@ namespace TMRJW
 
             double scaleFactor = _previewScale / oldScale;
 
-            var pos = e.GetPosition(PreviewImage);
+            var pos = e.GetPosition(FindControl<Image>("PreviewImage"));
 
             // Ajustar translate para mantener el punto bajo el cursor
-            PreviewTranslateTransform.X = (1 - scaleFactor) * (pos.X) + scaleFactor * PreviewTranslateTransform.X;
-            PreviewTranslateTransform.Y = (1 - scaleFactor) * (pos.Y) + scaleFactor * PreviewTranslateTransform.Y;
+            if (this.FindName("PreviewTranslateTransform") is TranslateTransform ptt)
+            {
+                ptt.X = (1 - scaleFactor) * (pos.X) + scaleFactor * ptt.X;
+                ptt.Y = (1 - scaleFactor) * (pos.Y) + scaleFactor * ptt.Y;
+            }
 
-            PreviewScaleTransform.ScaleX = _previewScale;
-            PreviewScaleTransform.ScaleY = _previewScale;
+            if (this.FindName("PreviewScaleTransform") is ScaleTransform pst)
+            {
+                pst.ScaleX = _previewScale;
+                pst.ScaleY = _previewScale;
+            }
 
             // Limitar la traslación para que la imagen no salga del borde del control
             ClampPreviewTranslation();
@@ -1082,7 +1059,7 @@ namespace TMRJW
             {
                 _isPanningPreview = true;
                 _lastPreviewMousePos = e.GetPosition(this);
-                try { Mouse.Capture(PreviewImage); } catch { }
+                try { Mouse.Capture(FindControl<Image>("PreviewImage")); } catch { }
             }
         }
 
@@ -1090,22 +1067,18 @@ namespace TMRJW
         {
             if (_isPanningPreview && e.LeftButton == MouseButtonState.Pressed)
             {
-                // Obtener movimiento relativo sobre el control PreviewImage en lugar de this para comportamiento consistente
-                var pos = e.GetPosition(PreviewImage);
-                var dx = pos.X - (_lastPreviewMousePos.X - (PreviewImage.TranslatePoint(new Point(0, 0), this).X));
-                var dy = pos.Y - (_lastPreviewMousePos.Y - (PreviewImage.TranslatePoint(new Point(0, 0), this).Y));
-
-                // Simplificar: usar movimiento del ratón sobre la ventana como antes, pero mantener clamp después.
                 var globalPos = e.GetPosition(this);
                 var gdx = globalPos.X - _lastPreviewMousePos.X;
                 var gdy = globalPos.Y - _lastPreviewMousePos.Y;
 
-                PreviewTranslateTransform.X += gdx;
-                PreviewTranslateTransform.Y += gdy;
+                if (this.FindName("PreviewTranslateTransform") is TranslateTransform ptt)
+                {
+                    ptt.X += gdx;
+                    ptt.Y += gdy;
+                }
 
                 _lastPreviewMousePos = globalPos;
 
-                // Limitar la traslación para que la imagen no salga del borde del control
                 ClampPreviewTranslation();
             }
         }
@@ -1122,10 +1095,8 @@ namespace TMRJW
         private void BtnPreviewReset_Click(object sender, RoutedEventArgs e)
         {
             _previewScale = 1.0;
-            PreviewScaleTransform.ScaleX = 1.0;
-            PreviewScaleTransform.ScaleY = 1.0;
-            PreviewTranslateTransform.X = 0;
-            PreviewTranslateTransform.Y = 0;
+            if (this.FindName("PreviewScaleTransform") is ScaleTransform pst) { pst.ScaleX = 1.0; pst.ScaleY = 1.0; }
+            if (this.FindName("PreviewTranslateTransform") is TranslateTransform ptt) { ptt.X = 0; ptt.Y = 0; }
 
             // Asegurar límites (centrar)
             ClampPreviewTranslation();
@@ -1134,47 +1105,28 @@ namespace TMRJW
         // Nuevo helper: limita la traslación de la imagen de previsualización
         private void ClampPreviewTranslation()
         {
-            if (PreviewImage == null) return;
+            // Si no existe preview, nada que hacer
+            var preview = FindControl<Image>("PreviewImage");
+            if (preview == null) return;
 
-            double vw = PreviewImage.ActualWidth;
-            double vh = PreviewImage.ActualHeight;
-            if (vw <= 0 || vh <= 0) return;
-
-            // Calcular tamaño mostrado de la imagen dentro del control teniendo en cuenta Stretch=Uniform
-            double dispW = vw;
-            double dispH = vh;
-            if (PreviewImage.Source is BitmapSource bmp && bmp.PixelWidth > 0 && bmp.PixelHeight > 0)
+            // Si no hay zoom (escala 1.0 o menor) forzamos centrado y no permitimos pan
+            if (_previewScale <= 1.0)
             {
-                double imgAspect = bmp.PixelWidth / (double)bmp.PixelHeight;
-                double controlAspect = vw / vh;
-                if (imgAspect > controlAspect)
+                if (this.FindName("PreviewTranslateTransform") is TranslateTransform ptt)
                 {
-                    // imagen limitada por ancho
-                    dispW = vw;
-                    dispH = vw / imgAspect;
+                    ptt.X = 0;
+                    ptt.Y = 0;
                 }
-                else
-                {
-                    // imagen limitada por alto
-                    dispH = vh;
-                    dispW = vh * imgAspect;
-                }
+                return;
             }
 
-            // Tamaño del contenido escalado
-            double cw = dispW * _previewScale;
-            double ch = dispH * _previewScale;
-
-            // Offset máximo permitido (origen en el centro)
-            double maxOffsetX = Math.Max(0, (cw - vw) / 2.0);
-            double maxOffsetY = Math.Max(0, (ch - vh) / 2.0);
-
-            PreviewTranslateTransform.X = Math.Clamp(PreviewTranslateTransform.X, -maxOffsetX, maxOffsetX);
-            PreviewTranslateTransform.Y = Math.Clamp(PreviewTranslateTransform.Y, -maxOffsetY, maxOffsetY);
+            // Con zoom activado, permitimos pan libre (no forzamos clamp).
+            // Nota: la ventana de proyección recibe sus transformaciones desde Monitor_MouseMove, Monitor_MouseWheel o los botones.
+            // Si quieres limitar el pan solo ligeramente, podemos introducir límites más amplios en vez de permitir pan ilimitado.
         }
 
         // Añade/pega este bloque dentro de la clase `MainWindow` (una sola vez).
-        // Implementa los handlers que faltaban y el helper ClampMonitorTranslation.
+        // Implementa los handlers que faltaban y el helper ApplyClampMonitorTranslation.
 
         private void SldTimeline_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
@@ -1191,13 +1143,7 @@ namespace TMRJW
         {
             if (!_isTimelineDragging)
             {
-                var txtCurrent = FindControl<TextBlock>("TxtCurrentTime");
-                if (txtCurrent != null)
-                {
-                    // Mostrar porcentaje por ahora (valor entre 0..1)
-                    double pct = Math.Clamp(e.NewValue, 0.0, 1.0) * 100.0;
-                    txtCurrent.Text = $"{Math.Round(pct)}%";
-                }
+                FindControl<TextBlock>("TxtCurrentTime")?.SetCurrentValue(TextBlock.TextProperty, $"{Math.Round(Math.Clamp(e.NewValue, 0.0, 1.0) * 100.0)}%");
             }
         }
 
@@ -1226,7 +1172,7 @@ namespace TMRJW
                 mst.ScaleY = _monitorScale;
             }
 
-            ClampMonitorTranslation();
+            ApplyClampMonitorTranslation();
 
             try { proyeccionWindow?.UpdateImageTransform(_monitorScale, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.X ?? 0, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.Y ?? 0); } catch { }
 
@@ -1259,7 +1205,7 @@ namespace TMRJW
 
             _lastMonitorMousePos = pos;
 
-            ClampMonitorTranslation();
+            ApplyClampMonitorTranslation();
 
             try { proyeccionWindow?.UpdateImageTransform(_monitorScale, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.X ?? 0, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.Y ?? 0); } catch { }
         }
@@ -1273,36 +1219,26 @@ namespace TMRJW
             }
         }
 
-        // Limita la traslación del MonitorDeSalida para que la imagen no desaparezca (considera Stretch=Uniform)
-        private void ClampMonitorTranslation()
+        // Implementación única y sin duplicados.
+        // Mantiene el comportamiento pedido: centrar cuando scale <= 1, permitir pan libre cuando está ampliada.
+        private void ApplyClampMonitorTranslation()
         {
             var monitor = FindControl<Image>("MonitorDeSalida");
             if (monitor == null) return;
 
-            double vw = monitor.ActualWidth;
-            double vh = monitor.ActualHeight;
-            if (vw <= 0 || vh <= 0) return;
-
-            double dispW = vw, dispH = vh;
-            if (monitor.Source is BitmapSource bmp && bmp.PixelWidth > 0 && bmp.PixelHeight > 0)
+            // Si no hay zoom (escala <= 1) centramos y evitamos desplazamiento
+            if (_monitorScale <= 1.0)
             {
-                double imgAspect = bmp.PixelWidth / (double)bmp.PixelHeight;
-                double controlAspect = vw / vh;
-                if (imgAspect > controlAspect) { dispW = vw; dispH = vw / imgAspect; }
-                else { dispH = vh; dispW = vh * imgAspect; }
+                if (this.FindName("MonitorTranslateTransform") is TranslateTransform mtZero)
+                {
+                    mtZero.X = 0;
+                    mtZero.Y = 0;
+                }
+                return;
             }
 
-            double cw = dispW * _monitorScale;
-            double ch = dispH * _monitorScale;
-
-            double maxOffsetX = Math.Max(0, (cw - vw) / 2.0);
-            double maxOffsetY = Math.Max(0, (ch - vh) / 2.0);
-
-            if (this.FindName("MonitorTranslateTransform") is TranslateTransform mt)
-            {
-                mt.X = Math.Clamp(mt.X, -maxOffsetX, maxOffsetX);
-                mt.Y = Math.Clamp(mt.Y, -maxOffsetY, maxOffsetY);
-            }
+            // Con zoom activado, permitimos pan libre (sin forzar clamp).
+            // Si en el futuro quieres limitar el pan, añade lógica aquí.
         }
 
         // ListaVideos selection changed
@@ -1315,17 +1251,17 @@ namespace TMRJW
 
             if (lista?.SelectedItem != null)
             {
-                if (mediaPanel != null) mediaPanel.Visibility = Visibility.Visible;
+                mediaPanel?.SetCurrentValue(FrameworkElement.VisibilityProperty, Visibility.Visible);
 
                 if (lista.SelectedItem is VideoItem vi)
                 {
                     txtInfo?.SetCurrentValue(TextBlock.TextProperty, $"Seleccionado: {vi.FileName}");
-                    if (preview != null && vi.Thumbnail != null) preview.Source = vi.Thumbnail;
+                    if (preview != null && vi.Thumbnail != null) preview.SetCurrentValue(Image.SourceProperty, vi.Thumbnail);
                 }
             }
             else
             {
-                if (mediaPanel != null) mediaPanel.Visibility = Visibility.Collapsed;
+                mediaPanel?.SetCurrentValue(FrameworkElement.VisibilityProperty, Visibility.Collapsed);
                 txtInfo?.SetCurrentValue(TextBlock.TextProperty, "Reproduciendo: Ninguno");
             }
         }
@@ -1352,9 +1288,11 @@ namespace TMRJW
         private void BtnResetZoom_Click(object sender, RoutedEventArgs e)
         {
             _monitorScale = 1.0;
-            if (this.FindName("MonitorScaleTransform") is ScaleTransform st) st.ScaleX = st.ScaleY = 1;
+            (this.FindName("MonitorScaleTransform") as ScaleTransform)?.SetCurrentValue(ScaleTransform.ScaleXProperty, 1.0);
+            (this.FindName("MonitorScaleTransform") as ScaleTransform)?.SetCurrentValue(ScaleTransform.ScaleYProperty, 1.0);
             if (this.FindName("MonitorTranslateTransform") is TranslateTransform tt) { tt.X = 0; tt.Y = 0; }
-            ClampMonitorTranslation();
+            // antes: ClampMonitorTranslation();
+            ApplyClampMonitorTranslation();
             try { proyeccionWindow?.UpdateImageTransform(1.0, 0, 0); } catch { }
         }
 
@@ -1414,13 +1352,15 @@ namespace TMRJW
 
             // Reset transforms de preview para evitar que quede zoom/pan previo
             _previewScale = 1.0;
-            if (this.FindName("PreviewScaleTransform") is ScaleTransform pst) { pst.ScaleX = pst.ScaleY = 1.0; }
+            (this.FindName("PreviewScaleTransform") as ScaleTransform)?.SetCurrentValue(ScaleTransform.ScaleXProperty, 1.0);
+            (this.FindName("PreviewScaleTransform") as ScaleTransform)?.SetCurrentValue(ScaleTransform.ScaleYProperty, 1.0);
             if (this.FindName("PreviewTranslateTransform") is TranslateTransform ptt) { ptt.X = 0; ptt.Y = 0; }
             try { ClampPreviewTranslation(); } catch { }
 
             // Reset transforms del monitor local
             _monitorScale = 1.0;
-            if (this.FindName("MonitorScaleTransform") is ScaleTransform mst) { mst.ScaleX = mst.ScaleY = 1.0; }
+            (this.FindName("MonitorScaleTransform") as ScaleTransform)?.SetCurrentValue(ScaleTransform.ScaleXProperty, 1.0);
+            (this.FindName("MonitorScaleTransform") as ScaleTransform)?.SetCurrentValue(ScaleTransform.ScaleYProperty, 1.0);
             if (this.FindName("MonitorTranslateTransform") is TranslateTransform mtt) { mtt.X = 0; mtt.Y = 0; }
             try { ClampMonitorTranslation(); } catch { }
 
@@ -1428,7 +1368,7 @@ namespace TMRJW
             if (showInProjection)
             {
                 try
-                {
+                {       
                     proyeccionWindow?.MostrarImagenTexto(img);
                     proyeccionWindow?.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
                     if (proyeccionWindow != null)
@@ -1446,6 +1386,59 @@ namespace TMRJW
             }
         }
 
+        // Reusa PreviewScaleStep para cambio de zoom
+        private void BtnZoomIn_Click(object sender, RoutedEventArgs e)
+        {
+            if (this.FindName("MonitorScaleTransform") is ScaleTransform mst)
+            {
+                _monitorScale = Math.Min(PreviewMaxScale, _monitorScale + PreviewScaleStep);
+                mst.SetCurrentValue(ScaleTransform.ScaleXProperty, _monitorScale);
+                mst.SetCurrentValue(ScaleTransform.ScaleYProperty, _monitorScale);
+
+                // antes: ClampMonitorTranslation();
+                ApplyClampMonitorTranslation();
+                var tt = this.FindName("MonitorTranslateTransform") as TranslateTransform;
+                try { proyeccionWindow?.UpdateImageTransform(_monitorScale, tt?.X ?? 0, tt?.Y ?? 0); } catch { }
+            }
+        }
+
+        private void BtnZoomOut_Click(object sender, RoutedEventArgs e)
+        {
+            if (this.FindName("MonitorScaleTransform") is ScaleTransform mst)
+            {
+                _monitorScale = Math.Max(PreviewMinScale, _monitorScale - PreviewScaleStep);
+                mst.SetCurrentValue(ScaleTransform.ScaleXProperty, _monitorScale);
+                mst.SetCurrentValue(ScaleTransform.ScaleYProperty, _monitorScale);
+
+                // antes: ClampMonitorTranslation();
+                ApplyClampMonitorTranslation();
+                var tt = this.FindName("MonitorTranslateTransform") as TranslateTransform;
+                try { proyeccionWindow?.UpdateImageTransform(_monitorScale, tt?.X ?? 0, tt?.Y ?? 0); } catch { }
+            }
+        }
+
+        private void PanMonitor(double dx, double dy)
+        {
+            if (this.FindName("MonitorTranslateTransform") is TranslateTransform mt)
+            {
+                mt.X += dx;
+                mt.Y += dy;
+
+                // antes: ClampMonitorTranslation();
+                ApplyClampMonitorTranslation();
+
+                try { proyeccionWindow?.UpdateImageTransform(_monitorScale, mt.X, mt.Y); } catch { }
+            }
+        }
+
+        // Agrega estos handlers dentro de la clase `MainWindow` (por ejemplo justo arriba o debajo de `PanMonitor`).
+        private void BtnPanLeft_Click(object sender, RoutedEventArgs e) => PanMonitor(-MonitorPanStep, 0);
+        private void BtnPanRight_Click(object sender, RoutedEventArgs e) => PanMonitor(MonitorPanStep, 0);
+        private void BtnPanUp_Click(object sender, RoutedEventArgs e) => PanMonitor(0, -MonitorPanStep);
+        private void BtnPanDown_Click(object sender, RoutedEventArgs e) => PanMonitor(0, MonitorPanStep);
+
+        // Añadir este wrapper dentro de la clase `MainWindow` (por ejemplo justo después de `ApplyClampMonitorTranslation`).
+        private void ClampMonitorTranslation() => ApplyClampMonitorTranslation();
     }
 }
 

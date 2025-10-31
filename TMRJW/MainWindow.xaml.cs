@@ -516,16 +516,6 @@ namespace TMRJW
             MessageBox.Show("No hay imagen de 'Texto del año' configurada o no se encontró el archivo.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
-        private void ListaPrograma_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
-        {
-            // lógica opcional
-        }
-
-        private void ListaPrograma_Drop(object sender, DragEventArgs e)
-        {
-            // lógica opcional
-        }
-
         private void BtnAsociarMedia_Click(object sender, RoutedEventArgs e)
         {
             // Ahora permite seleccionar videos o imágenes; agrega su registro en secciones apropiadas.
@@ -1102,8 +1092,8 @@ namespace TMRJW
             {
                 // Obtener movimiento relativo sobre el control PreviewImage en lugar de this para comportamiento consistente
                 var pos = e.GetPosition(PreviewImage);
-                var dx = pos.X - (_lastPreviewMousePos.X - (PreviewImage.TranslatePoint(new Point(0,0), this).X));
-                var dy = pos.Y - (_lastPreviewMousePos.Y - (PreviewImage.TranslatePoint(new Point(0,0), this).Y));
+                var dx = pos.X - (_lastPreviewMousePos.X - (PreviewImage.TranslatePoint(new Point(0, 0), this).X));
+                var dy = pos.Y - (_lastPreviewMousePos.Y - (PreviewImage.TranslatePoint(new Point(0, 0), this).Y));
 
                 // Simplificar: usar movimiento del ratón sobre la ventana como antes, pero mantener clamp después.
                 var globalPos = e.GetPosition(this);
@@ -1183,214 +1173,279 @@ namespace TMRJW
             PreviewTranslateTransform.Y = Math.Clamp(PreviewTranslateTransform.Y, -maxOffsetY, maxOffsetY);
         }
 
-        // Añade estos handlers al final de la clase `MainWindow` (antes de la llave final).
-// Sólo añádelos si no existen ya en tu archivo (evitar duplicados).
-private void SldTimeline_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-{
-    _isTimelineDragging = true;
-}
+        // Añade/pega este bloque dentro de la clase `MainWindow` (una sola vez).
+        // Implementa los handlers que faltaban y el helper ClampMonitorTranslation.
 
-private void SldTimeline_PreviewMouseUp(object sender, MouseButtonEventArgs e)
-{
-    _isTimelineDragging = false;
-    // Placeholder: si implementas seek en proyectionWindow, llama aquí a ese método.
-}
-
-private void SldTimeline_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-{
-    var txtCurrent = this.FindName("TxtCurrentTime") as TextBlock;
-    if (txtCurrent != null && !_isTimelineDragging)
-    {
-        double pct = Math.Clamp(e.NewValue, 0.0, 1.0) * 100.0;
-        txtCurrent.Text = $"{Math.Round(pct)}%";
-    }
-}
-
-private void Monitor_MouseWheel(object sender, MouseWheelEventArgs e)
-{
-    // Ajuste local de zoom/pan en el monitor de previsualización
-    if (MonitorDeSalida == null) return;
-
-    double oldScale = _monitorScale;
-    if (e.Delta > 0) _monitorScale = Math.Min(PreviewMaxScale, _monitorScale + PreviewScaleStep);
-    else _monitorScale = Math.Max(PreviewMinScale, _monitorScale - PreviewScaleStep);
-
-    double scaleFactor = _monitorScale / oldScale;
-    var pos = e.GetPosition(MonitorDeSalida);
-
-    MonitorTranslateTransform.X = (1 - scaleFactor) * (pos.X) + scaleFactor * MonitorTranslateTransform.X;
-    MonitorTranslateTransform.Y = (1 - scaleFactor) * (pos.Y) + scaleFactor * MonitorTranslateTransform.Y;
-
-    MonitorScaleTransform.ScaleX = _monitorScale;
-    MonitorScaleTransform.ScaleY = _monitorScale;
-
-    try { proyeccionWindow?.UpdateImageTransform(_monitorScale, MonitorTranslateTransform.X, MonitorTranslateTransform.Y); } catch { }
-
-    e.Handled = true;
-}
-
-private void Monitor_MouseDown(object sender, MouseButtonEventArgs e)
-{
-    if (e.ChangedButton == MouseButton.Left)
-    {
-        _isPanningMonitor = true;
-        _lastMonitorMousePos = e.GetPosition(this);
-        try { Mouse.Capture(MonitorDeSalida); } catch { }
-    }
-}
-
-private void Monitor_MouseMove(object sender, MouseEventArgs e)
-{
-    if (_isPanningMonitor && e.LeftButton == MouseButtonState.Pressed)
-    {
-        var pos = e.GetPosition(this);
-        var dx = pos.X - _lastMonitorMousePos.X;
-        var dy = pos.Y - _lastMonitorMousePos.Y;
-
-        MonitorTranslateTransform.X += dx;
-        MonitorTranslateTransform.Y += dy;
-
-        _lastMonitorMousePos = pos;
-
-        try { proyeccionWindow?.UpdateImageTransform(_monitorScale, MonitorTranslateTransform.X, MonitorTranslateTransform.Y); } catch { }
-    }
-}
-
-private void Monitor_MouseUp(object sender, MouseButtonEventArgs e)
-{
-    if (e.ChangedButton == MouseButton.Left)
-    {
-        _isPanningMonitor = false;
-        try { Mouse.Capture(null); } catch { }
-    }
-}
-
-private void ListaVideos_SelectionChanged(object sender, SelectionChangedEventArgs e)
-{
-    var lista = sender as ListBox ?? FindControl<ListBox>("ListaVideos");
-    var mediaPanel = FindControl<FrameworkElement>("MediaControlsPanel");
-    var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
-    var preview = FindControl<Image>("PreviewImage");
-
-    if (lista?.SelectedItem != null)
-    {
-        if (mediaPanel != null) mediaPanel.Visibility = Visibility.Visible;
-
-        if (lista.SelectedItem is VideoItem vi)
+        private void SldTimeline_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (txtInfo != null) txtInfo.Text = $"Reproduciendo: {vi.FileName}";
-            if (preview != null && vi.Thumbnail != null) preview.Source = vi.Thumbnail;
+            _isTimelineDragging = true;
         }
-        else
+
+        private void SldTimeline_PreviewMouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (txtInfo != null) txtInfo.Text = $"Reproduciendo: {lista.SelectedItem}";
+            _isTimelineDragging = false;
+            // Si se usa seek en proyeccion, aquí se llamaría al método correspondiente.
         }
-    }
-    else
-    {
-        if (mediaPanel != null) mediaPanel.Visibility = Visibility.Collapsed;
-        if (txtInfo != null) txtInfo.Text = "Reproduciendo: Ninguno";
-    }
-}
 
-private void BtnStop_Click(object sender, RoutedEventArgs e)
-{
-    proyeccionWindow?.StopVideo();
-    var playBtn = this.FindName("BtnPlayPause") as Button;
-    if (playBtn != null) playBtn.Content = "⏵";
-    var txt = this.FindName("TxtCurrentTime") as TextBlock;
-    if (txt != null) txt.Text = "00:00:00";
-}
-
-private void BtnResetZoom_Click(object sender, RoutedEventArgs e)
-{
-    var st = this.FindName("MonitorScaleTransform") as ScaleTransform;
-    var tt = this.FindName("MonitorTranslateTransform") as TranslateTransform;
-    if (st != null) st.ScaleX = st.ScaleY = 1;
-    if (tt != null) { tt.X = 0; tt.Y = 0; }
-    try { proyeccionWindow?.UpdateImageTransform(1.0, 0, 0); } catch { }
-}
-
-private void BtnPrev_Click(object sender, RoutedEventArgs e)
-{
-    var lista = this.FindName("ListaVideos") as ListBox;
-    if (lista == null || lista.Items.Count == 0) return;
-    int idx = lista.SelectedIndex;
-    idx = Math.Max(0, idx - 1);
-    lista.SelectedIndex = idx;
-    lista.ScrollIntoView(lista.SelectedItem);
-}
-
-private void BtnPlayPause_Click(object sender, RoutedEventArgs e)
-{
-    try
-    {
-        var btn = this.FindName("BtnPlayPause") as Button;
-        if (proyeccionWindow != null && proyeccionWindow.IsPlayingVideo)
+        private void SldTimeline_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            proyeccionWindow.PauseVideo();
-            if (btn != null) btn.Content = "⏵";
+            if (!_isTimelineDragging)
+            {
+                var txtCurrent = FindControl<TextBlock>("TxtCurrentTime");
+                if (txtCurrent != null)
+                {
+                    // Mostrar porcentaje por ahora (valor entre 0..1)
+                    double pct = Math.Clamp(e.NewValue, 0.0, 1.0) * 100.0;
+                    txtCurrent.Text = $"{Math.Round(pct)}%";
+                }
+            }
         }
-        else
+
+        // Monitor (imagen grande) - zoom / pan
+        private void Monitor_MouseWheel(object sender, MouseWheelEventArgs e)
         {
-            proyeccionWindow?.PlayVideo();
-            if (btn != null) btn.Content = "⏸";
+            var monitor = FindControl<Image>("MonitorDeSalida");
+            if (monitor == null) return;
+
+            double oldScale = _monitorScale;
+            if (e.Delta > 0) _monitorScale = Math.Min(PreviewMaxScale, _monitorScale + PreviewScaleStep);
+            else _monitorScale = Math.Max(PreviewMinScale, _monitorScale - PreviewScaleStep);
+
+            double scaleFactor = (oldScale <= 0) ? 1.0 : _monitorScale / oldScale;
+            var pos = e.GetPosition(monitor);
+
+            if (this.FindName("MonitorTranslateTransform") is TranslateTransform mt)
+            {
+                mt.X = (1 - scaleFactor) * (pos.X) + scaleFactor * mt.X;
+                mt.Y = (1 - scaleFactor) * (pos.Y) + scaleFactor * mt.Y;
+            }
+
+            if (this.FindName("MonitorScaleTransform") is ScaleTransform mst)
+            {
+                mst.ScaleX = _monitorScale;
+                mst.ScaleY = _monitorScale;
+            }
+
+            ClampMonitorTranslation();
+
+            try { proyeccionWindow?.UpdateImageTransform(_monitorScale, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.X ?? 0, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.Y ?? 0); } catch { }
+
+            e.Handled = true;
         }
-    }
-    catch { }
-}
 
-private void BtnNext_Click(object sender, RoutedEventArgs e)
-{
-    var lista = this.FindName("ListaVideos") as ListBox;
-    if (lista == null || lista.Items.Count == 0) return;
-    int idx = lista.SelectedIndex;
-    idx = Math.Min(lista.Items.Count - 1, (idx < 0 ? 0 : idx + 1));
-    lista.SelectedIndex = idx;
-    lista.ScrollIntoView(lista.SelectedItem);
-}
-
-// Nuevo helper: mostrar imagen en previsualización/monitor y asegurarse de detener cualquier vídeo activo
-private void DisplayImageAndStopVideo(BitmapImage img, bool showInProjection = false)
-{
-    if (img == null) return;
-
-    // Actualizar preview y monitor pequeños
-    var preview = FindControl<Image>("PreviewImage");
-    if (preview != null) preview.Source = img;
-
-    var monitor = FindControl<Image>("MonitorDeSalida");
-    if (monitor != null) monitor.Source = img;
-
-    // Detener reproducción en la ventana de proyección para evitar audio residual
-    try { proyeccionWindow?.StopVideo(); } catch { }
-
-    // Ocultar/desactivar los controles multimedia del panel principal
-    var mediaPanel = FindControl<FrameworkElement>("MediaControlsPanel");
-    if (mediaPanel != null) mediaPanel.Visibility = Visibility.Collapsed;
-
-    // Reset visual de controles (Play => ►) y timeline
-    var playBtn = this.FindName("BtnPlayPause") as Button;
-    if (playBtn != null) playBtn.Content = "⏵";
-    var txtCurrent = this.FindName("TxtCurrentTime") as TextBlock;
-    if (txtCurrent != null) txtCurrent.Text = "00:00:00";
-    var sld = this.FindName("SldTimeline") as Slider;
-    if (sld != null) sld.Value = 0;
-
-    // Mostrar en la ventana de proyección si se solicita
-    if (showInProjection)
-    {
-        try
+        private void Monitor_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            proyeccionWindow?.MostrarImagenTexto(img);
-            proyeccionWindow?.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
-            proyeccionWindow?.Show();
-            _isProjecting = true;
-            var btn = FindControl<Button>("BtnProyectarHDMI");
-            if (btn != null) btn.Content = "PROYECTAR ON/OFF (ON)";
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningMonitor = true;
+                _lastMonitorMousePos = e.GetPosition(this);
+                try { Mouse.Capture(FindControl<Image>("MonitorDeSalida")); } catch { }
+            }
         }
-        catch { }
+
+        private void Monitor_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_isPanningMonitor || e.LeftButton != MouseButtonState.Pressed) return;
+
+            var pos = e.GetPosition(this);
+            var dx = pos.X - _lastMonitorMousePos.X;
+            var dy = pos.Y - _lastMonitorMousePos.Y;
+
+            if (this.FindName("MonitorTranslateTransform") is TranslateTransform mt)
+            {
+                mt.X += dx;
+                mt.Y += dy;
+            }
+
+            _lastMonitorMousePos = pos;
+
+            ClampMonitorTranslation();
+
+            try { proyeccionWindow?.UpdateImageTransform(_monitorScale, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.X ?? 0, (this.FindName("MonitorTranslateTransform") as TranslateTransform)?.Y ?? 0); } catch { }
+        }
+
+        private void Monitor_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningMonitor = false;
+                try { Mouse.Capture(null); } catch { }
+            }
+        }
+
+        // Limita la traslación del MonitorDeSalida para que la imagen no desaparezca (considera Stretch=Uniform)
+        private void ClampMonitorTranslation()
+        {
+            var monitor = FindControl<Image>("MonitorDeSalida");
+            if (monitor == null) return;
+
+            double vw = monitor.ActualWidth;
+            double vh = monitor.ActualHeight;
+            if (vw <= 0 || vh <= 0) return;
+
+            double dispW = vw, dispH = vh;
+            if (monitor.Source is BitmapSource bmp && bmp.PixelWidth > 0 && bmp.PixelHeight > 0)
+            {
+                double imgAspect = bmp.PixelWidth / (double)bmp.PixelHeight;
+                double controlAspect = vw / vh;
+                if (imgAspect > controlAspect) { dispW = vw; dispH = vw / imgAspect; }
+                else { dispH = vh; dispW = vh * imgAspect; }
+            }
+
+            double cw = dispW * _monitorScale;
+            double ch = dispH * _monitorScale;
+
+            double maxOffsetX = Math.Max(0, (cw - vw) / 2.0);
+            double maxOffsetY = Math.Max(0, (ch - vh) / 2.0);
+
+            if (this.FindName("MonitorTranslateTransform") is TranslateTransform mt)
+            {
+                mt.X = Math.Clamp(mt.X, -maxOffsetX, maxOffsetX);
+                mt.Y = Math.Clamp(mt.Y, -maxOffsetY, maxOffsetY);
+            }
+        }
+
+        // ListaVideos selection changed
+        private void ListaVideos_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var lista = sender as ListBox ?? FindControl<ListBox>("ListaVideos");
+            var mediaPanel = FindControl<FrameworkElement>("MediaControlsPanel");
+            var txtInfo = FindControl<TextBlock>("TxtInfoMedia");
+            var preview = FindControl<Image>("PreviewImage");
+
+            if (lista?.SelectedItem != null)
+            {
+                if (mediaPanel != null) mediaPanel.Visibility = Visibility.Visible;
+
+                if (lista.SelectedItem is VideoItem vi)
+                {
+                    txtInfo?.SetCurrentValue(TextBlock.TextProperty, $"Seleccionado: {vi.FileName}");
+                    if (preview != null && vi.Thumbnail != null) preview.Source = vi.Thumbnail;
+                }
+            }
+            else
+            {
+                if (mediaPanel != null) mediaPanel.Visibility = Visibility.Collapsed;
+                txtInfo?.SetCurrentValue(TextBlock.TextProperty, "Reproduciendo: Ninguno");
+            }
+        }
+
+        // ListaPrograma placeholders
+        private void ListaPrograma_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            // Opcional: abrir edición del item o asociar media
+        }
+
+        private void ListaPrograma_Drop(object sender, DragEventArgs e)
+        {
+            // Opcional: manejar arrastrar/soltar de archivos al programa
+        }
+
+        // Controles de reproducción básicos en la UI principal
+        private void BtnStop_Click(object sender, RoutedEventArgs e)
+        {
+            proyeccionWindow?.StopVideo();
+            FindControl<Button>("BtnPlayPause")?.SetCurrentValue(ContentProperty, "⏵");
+            FindControl<TextBlock>("TxtCurrentTime")?.SetCurrentValue(TextBlock.TextProperty, "00:00:00");
+        }
+
+        private void BtnResetZoom_Click(object sender, RoutedEventArgs e)
+        {
+            _monitorScale = 1.0;
+            if (this.FindName("MonitorScaleTransform") is ScaleTransform st) st.ScaleX = st.ScaleY = 1;
+            if (this.FindName("MonitorTranslateTransform") is TranslateTransform tt) { tt.X = 0; tt.Y = 0; }
+            ClampMonitorTranslation();
+            try { proyeccionWindow?.UpdateImageTransform(1.0, 0, 0); } catch { }
+        }
+
+        private void BtnPrev_Click(object sender, RoutedEventArgs e)
+        {
+            var lista = FindControl<ListBox>("ListaVideos");
+            if (lista == null || lista.Items.Count == 0) return;
+            int idx = Math.Max(0, (lista.SelectedIndex < 0 ? 0 : lista.SelectedIndex) - 1);
+            lista.SelectedIndex = idx;
+            lista.ScrollIntoView(lista.SelectedItem);
+        }
+
+        private void BtnPlayPause_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var btn = sender as Button ?? FindControl<Button>("BtnPlayPause");
+                if (proyeccionWindow != null && proyeccionWindow.IsPlayingVideo)
+                {
+                    proyeccionWindow.PauseVideo();
+                    btn?.SetCurrentValue(ContentProperty, "⏵");
+                }
+                else
+                {
+                    proyeccionWindow?.PlayVideo();
+                    btn?.SetCurrentValue(ContentProperty, "⏸");
+                }
+            }
+            catch { }
+        }
+
+        private void BtnNext_Click(object sender, RoutedEventArgs e)
+        {
+            var lista = FindControl<ListBox>("ListaVideos");
+            if (lista == null || lista.Items.Count == 0) return;
+            int idx = lista.SelectedIndex;
+            idx = Math.Min(lista.Items.Count - 1, (idx < 0 ? 0 : idx + 1));
+            lista.SelectedIndex = idx;
+            lista.ScrollIntoView(lista.SelectedItem);
+        }
+
+        // Añade este método dentro de la clase `MainWindow` (una sola vez).
+        // Implementa la acción de mostrar una imagen en preview/monitor y detener cualquier vídeo activo.
+        private void DisplayImageAndStopVideo(BitmapImage img, bool showInProjection = false)
+        {
+            if (img == null) return;
+
+            // Actualizar preview y monitor (si existen)
+            FindControl<Image>("PreviewImage")?.SetCurrentValue(Image.SourceProperty, img);
+            FindControl<Image>("MonitorDeSalida")?.SetCurrentValue(Image.SourceProperty, img);
+
+            // Detener cualquier reproducción en la ventana de proyección
+            try { proyeccionWindow?.StopVideo(); } catch { }
+
+            // Ocultar panel de controles multimedia en la UI principal (si existe)
+            FindControl<FrameworkElement>("MediaControlsPanel")?.SetCurrentValue(FrameworkElement.VisibilityProperty, Visibility.Collapsed);
+
+            // Reset transforms de preview para evitar que quede zoom/pan previo
+            _previewScale = 1.0;
+            if (this.FindName("PreviewScaleTransform") is ScaleTransform pst) { pst.ScaleX = pst.ScaleY = 1.0; }
+            if (this.FindName("PreviewTranslateTransform") is TranslateTransform ptt) { ptt.X = 0; ptt.Y = 0; }
+            try { ClampPreviewTranslation(); } catch { }
+
+            // Reset transforms del monitor local
+            _monitorScale = 1.0;
+            if (this.FindName("MonitorScaleTransform") is ScaleTransform mst) { mst.ScaleX = mst.ScaleY = 1.0; }
+            if (this.FindName("MonitorTranslateTransform") is TranslateTransform mtt) { mtt.X = 0; mtt.Y = 0; }
+            try { ClampMonitorTranslation(); } catch { }
+
+            // Mostrar en la ventana de proyección si se solicita
+            if (showInProjection)
+            {
+                try
+                {
+                    proyeccionWindow?.MostrarImagenTexto(img);
+                    proyeccionWindow?.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+                    if (proyeccionWindow != null)
+                    {
+                        if (proyeccionWindow.WindowState == WindowState.Minimized)
+                        {
+                            proyeccionWindow.WindowState = WindowState.Normal;
+                        }
+                        proyeccionWindow.Show();
+                        _isProjecting = true;
+                        FindControl<Button>("BtnProyectarHDMI")?.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (ON)");
+                    }
+                }
+                catch { }
+            }
+        }
+
     }
 }
-    }
-}
+

@@ -66,9 +66,9 @@
 
             <!-- Toolbar top -->
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="10,5,10,10" HorizontalAlignment="Stretch">
-                <TextBlock Text="Guía Semanal:" Foreground="White" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 <Button x:Name="BtnCargarArchivo" Content="Cargar Guía (EPUB)" Height="30" Width="130" Click="BtnCargarArchivo_Click" Margin="0,0,10,0"/>
                 <Button x:Name="BtnAsociarMedia" Content="Asociar Videos" Width="95" Click="BtnAsociarMedia_Click" Height="30" />
+                <Button x:Name="BtnOpenBrowser" Content="Navegar Biblioteca" Click="BtnOpenBrowser_Click" Margin="6,0,0,0" />
             </StackPanel>
 
             <!-- Bottom action buttons fijados al borde inferior para liberar espacio central -->

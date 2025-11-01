@@ -1136,7 +1136,7 @@ namespace TMRJW
         private void SldTimeline_PreviewMouseUp(object sender, MouseButtonEventArgs e)
         {
             _isTimelineDragging = false;
-            // Si se usa seek en proyeccion, aquí se llamaría al método correspondiente.
+            // Si se usa seek en proyection, aquí se llamaría al método correspondiente.
         }
 
         private void SldTimeline_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1439,6 +1439,28 @@ namespace TMRJW
 
         // Añadir este wrapper dentro de la clase `MainWindow` (por ejemplo justo después de `ApplyClampMonitorTranslation`).
         private void ClampMonitorTranslation() => ApplyClampMonitorTranslation();
+
+        // Añadir este manejador dentro de la clase `MainWindow` (p. ej. junto a otros handlers de botón).
+        private void BtnOpenBrowser_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var bw = new BrowserWindow()
+                {
+                    Owner = this
+                };
+
+                // Asignar callback después de crear la ventana (evita depender de un ctor con 1 argumento)
+                bw.SetImageSelectedCallback(img =>
+                {
+                    // Asegurarse de ejecutar en UI thread y proyectar la imagen seleccionada
+                    Dispatcher.Invoke(() => DisplayImageAndStopVideo(img, true));
+                });
+
+                bw.Show();
+            }
+            catch { /* ignorar errores al abrir navegador */ }
+        }
     }
 }
 

@@ -74,11 +74,8 @@ namespace TMRJW
             InjectClickScript(); // inyectar handlers para clicks dentro de la página
         }
 
-        private async void BtnRefreshImages_Click(object sender, RoutedEventArgs e)
-        {
-            await RefreshImagesFromCurrentPageAsync();
-            InjectClickScript();
-        }
+        // NOTE: handler BtnRefreshImages_Click está implementado en BrowserWindow.Events.cs
+        // para evitar definición duplicada lo eliminé de este archivo.
 
         private async Task RefreshImagesFromCurrentPageAsync()
         {
@@ -144,8 +141,6 @@ namespace TMRJW
         {
             try
             {
-                // obtener instancia ActiveX y silenciar diálogos de script
-                // usar dynamic para evitar error de compilación sobre 'object' sin miembro 'Silent'
                 dynamic? activeX = WebBrowserControl.GetType().InvokeMember("ActiveXInstance",
                     System.Reflection.BindingFlags.GetProperty | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
                     null, WebBrowserControl, new object[] { });

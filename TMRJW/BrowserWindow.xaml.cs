@@ -50,6 +50,10 @@ namespace TMRJW
             ImagesListBox.MouseDoubleClick += ImagesListBox_MouseDoubleClick;
             ImagesListBox.KeyDown += ImagesListBox_KeyDown;
 
+            // Recalcular tamaño de miniaturas al cargar / redimensionar
+            ImagesListBox.Loaded += (s, e) => UpdateWrapPanelItemSize();
+            ImagesListBox.SizeChanged += (s, e) => UpdateWrapPanelItemSize();
+
             // Registrar eventos para interacción con PreviewImage (zoom/pan con Espacio)
             this.PreviewKeyDown += Window_PreviewKeyDown;
             this.PreviewKeyUp += Window_PreviewKeyUp;
@@ -290,7 +294,9 @@ namespace TMRJW
                 s.ScaleY = newScale;
 
                 // Propagar la transformación a la proyección (si hay ventana de proyección abierta)
-                SyncProjectionTransform(newScale, t.X, t.Y);
+                // SyncProjectionTransform está implementado en BrowserWindow.Events.cs (única copia)
+                // Aquí sólo llamamos al método existente.
+                try { SyncProjectionTransform(newScale, t.X, t.Y); } catch { }
 
                 e.Handled = true;
             }
@@ -329,7 +335,7 @@ namespace TMRJW
 
                 // Propagar cambios a la proyección
                 var s = (EnsurePreviewTransforms().scale.ScaleX);
-                SyncProjectionTransform(s, t.X, t.Y);
+                try { SyncProjectionTransform(s, t.X, t.Y); } catch { }
             }
             catch
             {
@@ -344,26 +350,6 @@ namespace TMRJW
                 _isPanningPreview = false;
                 try { Mouse.Capture(null); } catch { }
             }
-        }
-
-        // Buscar instancias de ProyeccionWindow y actualizar sus transformaciones
-        private void SyncProjectionTransform(double scale, double offsetX, double offsetY)
-        {
-            try
-            {
-                foreach (Window w in Application.Current.Windows)
-                {
-                    if (w is ProyeccionWindow pw)
-                    {
-                        try
-                        {
-                            pw.UpdateImageTransform(scale, offsetX, offsetY);
-                        }
-                        catch { /* ignorar errores de sincronización */ }
-                    }
-                }
-            }
-            catch { }
         }
 
         // Silenciar errores de script en el WebBrowser (usa ActiveX.Silent)
@@ -427,8 +413,8 @@ namespace TMRJW
                             // Añadir al inventario (append) COMO CachedImage para consistencia
                             ImagesListBox.Items.Add(new CachedImage { FilePath = "", Image = bmp });
 
-                            // NOTA: No seleccionar ni invocar _onImageSelected para evitar proyección automática.
-                            // La proyección solo se disparará cuando el usuario haga doble click o presione Enter en el inventario (ImagesListBox).
+                            // Actualizar layout responsivo tras añadir item
+                            try { UpdateWrapPanelItemSize(); } catch { }
                         }
                         catch { }
                     });

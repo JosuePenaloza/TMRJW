@@ -2,15 +2,62 @@
 <Window x:Class="TMRJW.BrowserWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:TMRJW"
         Title="Navegador" Height="680" Width="1100" MinWidth="900" MinHeight="520">
+    <Window.Resources>
+        <!-- Plantilla para CachedImage: imagen con botón eliminar en esquina -->
+        <DataTemplate DataType="{x:Type local:CachedImage}">
+            <Border Margin="6" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1"
+                    Padding="6" MinWidth="120" MinHeight="150"
+                    Width="{Binding RelativeSource={RelativeSource AncestorType=WrapPanel}, Path=ItemWidth}">
+                <Grid>
+                    <!-- Imagen -->
+                    <Image Source="{Binding Image}" Stretch="UniformToFill" Height="110" VerticalAlignment="Top"/>
+
+                    <!-- Botón eliminar como overlay en esquina superior derecha -->
+                    <Button Content="🗑"
+                            Width="28" Height="28"
+                            ToolTip="Eliminar imagen"
+                            Click="BtnDeleteImage_Click"
+                            DataContext="{Binding}"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Margin="2"
+                            Background="#CCFFFFFF"
+                            Panel.ZIndex="2" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- Plantilla para BitmapImage: misma apariencia -->
+        <DataTemplate DataType="{x:Type BitmapImage}">
+            <Border Margin="6" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1"
+                    Padding="6" MinWidth="120" MinHeight="150"
+                    Width="{Binding RelativeSource={RelativeSource AncestorType=WrapPanel}, Path=ItemWidth}">
+                <Grid>
+                    <Image Source="{Binding}" Stretch="UniformToFill" Height="110" VerticalAlignment="Top"/>
+                    <Button Content="🗑"
+                            Width="28" Height="28"
+                            ToolTip="Eliminar imagen"
+                            Click="BtnDeleteImage_Click"
+                            DataContext="{Binding}"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Margin="2"
+                            Background="#CCFFFFFF"
+                            Panel.ZIndex="2" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
     <Grid Margin="6">
-        <!-- Proporciones solicitadas: 55% navegación / 45% inventario -->
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="0.55*" />
             <ColumnDefinition Width="0.45*" />
         </Grid.ColumnDefinitions>
 
-        <!-- LEFT: Navegador -->
+        <!-- LEFT: Navegador (sin cambios) -->
         <Grid x:Name="PrincipalNavegacion" Grid.Column="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -51,6 +98,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
+            <!-- Controles superiores (sin cambios) -->
             <Grid Grid.Row="0" Margin="0,4,0,6">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>  <!-- botones pequeños (izquierda) -->
@@ -77,12 +125,34 @@
             </TabControl>
 
             <Border Grid.Row="2" Background="#F3F3F3" BorderBrush="#CCC" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
-                <StackPanel>
-                    <TextBlock Text="INVENTARIO DE IMÁGENES" FontWeight="Bold" Margin="0,0,0,8" />
-                    <ListBox x:Name="ImagesListBox" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
-                </StackPanel>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="INVENTARIO DE IMÁGENES" FontWeight="Bold" Margin="0,0,0,8" Grid.Row="0"/>
+
+                    <!-- ListBox con WrapPanel horizontal (items por fila), scroll vertical -->
+                    <ListBox x:Name="ImagesListBox"
+                             Grid.Row="1"
+                             HorizontalContentAlignment="Stretch"
+                             VerticalContentAlignment="Top"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.CanContentScroll="False"
+                             SelectionMode="Single">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <!-- Orientation="Horizontal": items fluyen L->R y al no caber hacen wrap a la siguiente fila -->
+                                <WrapPanel IsItemsHost="True" Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                    </ListBox>
+                </Grid>
             </Border>
 
+            <!-- Preview y controles (sin cambios) -->
             <Border Grid.Row="3" Background="#E8F7FF" BorderBrush="#BEE6FF" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,8,0,6">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -106,6 +176,7 @@
                 </Grid>
             </Border>
 
+            <!-- Botones de zoom/pan/reset (sin cambios) -->
             <Border Grid.Row="4" Background="#FFFFFF" CornerRadius="4" BorderBrush="#C7A77B" BorderThickness="1" Padding="6" Margin="0,0,0,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Margin="0,0,12,0" x:Name="ZoomButtonsPanel" VerticalAlignment="Center">

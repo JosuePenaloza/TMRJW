@@ -8,17 +8,10 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using System.Collections.Generic;
+using System.Windows.Controls; // para WrapPanel
 
 namespace TMRJW
 {
-    // Tipo ligero para representar imágenes cacheadas en disco
-    internal class CachedImage
-    {
-        public string FilePath { get; set; } = string.Empty;
-        public BitmapImage Image { get; set; } = null!;
-        public override string ToString() => Path.GetFileName(FilePath);
-    }
-
     public partial class BrowserWindow
     {
         private bool _projectionPowerOn = false;
@@ -94,6 +87,9 @@ namespace TMRJW
                         catch { }
                     }
                     MessageBox.Show($"Capturadas {added} imágenes y añadidas al inventario.", "Captura completa", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                    // Ajustar miniaturas tras añadir
+                    try { UpdateWrapPanelItemSize(); } catch { }
                 });
             }
             catch
@@ -216,6 +212,9 @@ namespace TMRJW
                 }
                 catch { }
             }
+
+            // Ajustar miniaturas tras añadir
+            try { UpdateWrapPanelItemSize(); } catch { }
         }
 
         private void BtnTextoDelAnio_Click(object sender, RoutedEventArgs e)
@@ -246,6 +245,48 @@ namespace TMRJW
         private void BtnReturnToMain_Click(object sender, RoutedEventArgs e)
         {
             try { this.Close(); } catch { }
+        }
+
+        // Handler para eliminar imagen del inventario (botón 🗑)
+        private void BtnDeleteImage_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (sender is not System.Windows.Controls.Button btn) return;
+                var item = btn.DataContext;
+                if (item == null) return;
+
+                // Confirmar eliminación
+                var res = MessageBox.Show("¿Eliminar esta imagen del inventario?", "Confirmar eliminación", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (res != MessageBoxResult.Yes) return;
+
+                // Si es CachedImage intentamos borrar el archivo cacheado
+                if (item is CachedImage ci)
+                {
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(ci.FilePath) && File.Exists(ci.FilePath))
+                        {
+                            try { File.Delete(ci.FilePath); } catch { /* ignorar fallo borrado */ }
+                        }
+                    }
+                    catch { }
+                    try { ImagesListBox.Items.Remove(ci); } catch { }
+
+                    // ajustar layout
+                    try { UpdateWrapPanelItemSize(); } catch { }
+                    return;
+                }
+
+                // Si es BitmapImage o string, simplemente remover el item
+                try
+                {
+                    ImagesListBox.Items.Remove(item);
+                    try { UpdateWrapPanelItemSize(); } catch { }
+                }
+                catch { }
+            }
+            catch { }
         }
 
         // Preview: reproducir media en el panel de previsualización
@@ -357,16 +398,19 @@ namespace TMRJW
 
         private void BtnZoomIn_Click(object sender, RoutedEventArgs e)
         {
-            var (s, _) = EnsurePreviewTransforms();
-            s.ScaleX += ZoomStep;
-            s.ScaleY += ZoomStep;
+            var (s, t) = EnsurePreviewTransforms();
+            s.ScaleX = Math.Min(5.0, s.ScaleX + ZoomStep);
+            s.ScaleY = s.ScaleX;
+            // Sincronizar a la proyección
+            try { SyncProjectionTransform(s.ScaleX, t.X, t.Y); } catch { }
         }
 
         private void BtnZoomOut_Click(object sender, RoutedEventArgs e)
         {
-            var (s, _) = EnsurePreviewTransforms();
+            var (s, t) = EnsurePreviewTransforms();
             s.ScaleX = Math.Max(0.2, s.ScaleX - ZoomStep);
-            s.ScaleY = Math.Max(0.2, s.ScaleY - ZoomStep);
+            s.ScaleY = s.ScaleX;
+            try { SyncProjectionTransform(s.ScaleX, t.X, t.Y); } catch { }
         }
 
         private void BtnResetZoom_Click(object sender, RoutedEventArgs e)
@@ -374,36 +418,110 @@ namespace TMRJW
             var (s, t) = EnsurePreviewTransforms();
             s.ScaleX = 1.0; s.ScaleY = 1.0;
             t.X = 0; t.Y = 0;
+            try { SyncProjectionTransform(1.0, 0, 0); } catch { }
         }
 
         private void BtnPanLeft_Click(object sender, RoutedEventArgs e)
         {
-            var (_, t) = EnsurePreviewTransforms();
+            var (s, t) = EnsurePreviewTransforms();
             t.X -= 40;
+            try { SyncProjectionTransform(s.ScaleX, t.X, t.Y); } catch { }
         }
 
         private void BtnPanRight_Click(object sender, RoutedEventArgs e)
         {
-            var (_, t) = EnsurePreviewTransforms();
+            var (s, t) = EnsurePreviewTransforms();
             t.X += 40;
+            try { SyncProjectionTransform(s.ScaleX, t.X, t.Y); } catch { }
         }
 
         private void BtnPanUp_Click(object sender, RoutedEventArgs e)
         {
-            var (_, t) = EnsurePreviewTransforms();
+            var (s, t) = EnsurePreviewTransforms();
             t.Y -= 40;
+            try { SyncProjectionTransform(s.ScaleX, t.X, t.Y); } catch { }
         }
 
         private void BtnPanDown_Click(object sender, RoutedEventArgs e)
         {
-            var (_, t) = EnsurePreviewTransforms();
+            var (s, t) = EnsurePreviewTransforms();
             t.Y += 40;
+            try { SyncProjectionTransform(s.ScaleX, t.X, t.Y); } catch { }
         }
 
         // -------------------------
-        // Helpers para cache/IO
+        // Helpers para layout responsivo (WrapPanel)
         // -------------------------
 
+        private void UpdateWrapPanelItemSize()
+        {
+            try
+            {
+                var wrap = FindVisualChild<WrapPanel>(ImagesListBox);
+                if (wrap == null) return;
+
+                double availableWidth = ImagesListBox.ActualWidth;
+                if (availableWidth <= 0) return;
+
+                double scrollbarWidth = SystemParameters.VerticalScrollBarWidth;
+                availableWidth = Math.Max(0, availableWidth - scrollbarWidth - ImagesListBox.Padding.Left - ImagesListBox.Padding.Right - 12);
+
+                const double minThumbWidth = 140.0;
+                const int maxCols = 3;
+
+                int cols = Math.Min(maxCols, Math.Max(1, (int)Math.Floor(availableWidth / minThumbWidth)));
+                if (cols < 1) cols = 1;
+
+                double spacing = 12.0;
+                double itemWidth = Math.Floor((availableWidth - (cols - 1) * spacing) / cols);
+                if (itemWidth < 80) itemWidth = 80;
+
+                try
+                {
+                    wrap.ItemWidth = itemWidth;
+                    // ajustar altura aproximada (imagen + botones)
+                    wrap.ItemHeight = Math.Floor(itemWidth * 110.0 / 150.0) + 44;
+                }
+                catch { }
+            }
+            catch { }
+        }
+
+        // Helper para buscar hijo visual
+        private static T? FindVisualChild<T>(DependencyObject depObj) where T : DependencyObject
+        {
+            if (depObj == null) return null;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(depObj); i++)
+            {
+                var child = VisualTreeHelper.GetChild(depObj, i);
+                if (child is T t) return t;
+                var result = FindVisualChild<T>(child);
+                if (result != null) return result;
+            }
+            return null;
+        }
+
+        // Buscar instancias de ProyeccionWindow y actualizar sus transformaciones
+        private void SyncProjectionTransform(double scale, double offsetX, double offsetY)
+        {
+            try
+            {
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw)
+                    {
+                        try
+                        {
+                            pw.UpdateImageTransform(scale, offsetX, offsetY);
+                        }
+                        catch { /* ignorar errores de sincronización */ }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Helpers para cache/IO
         private BitmapImage? LoadBitmapFromFileCached(string path)
         {
             try
@@ -426,7 +544,7 @@ namespace TMRJW
         {
             try
             {
-                var dir = GetCacheDirectory(); // GetCacheDirectory está en BrowserWindow.xaml.cs
+                var dir = GetCacheDirectory(); // GetCacheDirectory está en este archivo
                 Directory.CreateDirectory(dir);
                 string ext = string.IsNullOrWhiteSpace(extension) ? ".jpg" : extension;
                 if (!ext.StartsWith(".")) ext = "." + ext;

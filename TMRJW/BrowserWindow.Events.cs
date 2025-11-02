@@ -1,14 +1,24 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using System.Collections.Generic;
 
 namespace TMRJW
 {
+    // Tipo ligero para representar imágenes cacheadas en disco
+    internal class CachedImage
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public BitmapImage Image { get; set; } = null!;
+        public override string ToString() => Path.GetFileName(FilePath);
+    }
+
     public partial class BrowserWindow
     {
         private bool _projectionPowerOn = false;
@@ -29,13 +39,70 @@ namespace TMRJW
             try { await RefreshImagesFromCurrentPageAsync(); InjectClickScript(); } catch { }
         }
 
+        // Ahora captura/descarga todas las imágenes de la página, guarda en cache y las añade al inventario
         private async void BtnCaptureFromPage_Click(object sender, RoutedEventArgs e)
         {
-            // Reutiliza la lógica existente para extraer/descargar imágenes desde la página
-            try { await RefreshImagesFromCurrentPageAsync(); } catch { }
+            try
+            {
+                var url = WebBrowserControl.Source?.AbsoluteUri ?? UrlBox.Text;
+                if (string.IsNullOrWhiteSpace(url)) return;
+
+                // extraer URIs
+                var uris = await OnlineLibraryHelper.ExtractImageUrisFromPageAsync(url, CancellationToken.None);
+                if (!uris.Any())
+                {
+                    MessageBox.Show("No se encontraron imágenes en la página.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                // descargar todas (secuencial para evitar sobrecarga; se puede paralelizar con limitador)
+                var imagesList = new List<(Uri Uri, byte[]? Bytes)>();
+                foreach (var u in uris)
+                {
+                    try
+                    {
+                        var bytes = await s_http.GetByteArrayAsync(u).ConfigureAwait(false);
+                        imagesList.Add((u, bytes));
+                    }
+                    catch
+                    {
+                        imagesList.Add((u, null));
+                    }
+                }
+
+                var added = 0;
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    foreach (var item in imagesList)
+                    {
+                        if (item.Bytes == null) continue;
+                        try
+                        {
+                            var ext = Path.GetExtension(item.Uri.LocalPath);
+                            var path = SaveBytesToCacheAsync(item.Bytes, ext).GetAwaiter().GetResult();
+                            if (!string.IsNullOrEmpty(path))
+                            {
+                                var bi = LoadBitmapFromFileCached(path);
+                                if (bi != null)
+                                {
+                                    var ci = new CachedImage { FilePath = path, Image = bi };
+                                    ImagesListBox.Items.Add(ci);
+                                    added++;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                    MessageBox.Show($"Capturadas {added} imágenes y añadidas al inventario.", "Captura completa", MessageBoxButton.OK, MessageBoxImage.Information);
+                });
+            }
+            catch
+            {
+                MessageBox.Show("Error al capturar imágenes de la página.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
-        private void BtnProjectionPower_Click(object sender, RoutedEventArgs e)
+        private async void BtnProjectionPower_Click(object sender, RoutedEventArgs e)
         {
             _projectionPowerOn = !_projectionPowerOn;
             var btnSender = sender as System.Windows.Controls.Button;
@@ -44,32 +111,66 @@ namespace TMRJW
 
             if (_projectionPowerOn)
             {
-                // Al encender: intentar enviar la imagen seleccionada al MainWindow vía callback
+                // Intentar obtener imagen local inmediata
                 BitmapImage? imgToProject = null;
 
-                // Preferir selección en inventario
-                if (ImagesListBox.SelectedItem is BitmapImage selBI)
-                {
-                    imgToProject = selBI;
-                }
-                // Si hay imagen en preview
+                if (ImagesListBox.SelectedItem is CachedImage ciSel)
+                    imgToProject = ciSel.Image;
+                else if (ImagesListBox.SelectedItem is BitmapImage biSel)
+                    imgToProject = biSel;
                 else if (PreviewImage?.Source is BitmapImage previewBI)
-                {
                     imgToProject = previewBI;
-                }
 
                 if (imgToProject != null)
                 {
                     try { _onImageSelected?.Invoke(imgToProject); } catch { }
+                    return;
                 }
-                else
+
+                // Si hay descarga en curso, marcamos que estamos esperando y salimos (la callback se ejecutará al terminar)
+                if (_isDownloadingImage)
                 {
-                    MessageBox.Show("No hay imagen seleccionada para proyectar. Selecciona una imagen en el inventario o en la previsualización.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                    _projectionWaitingForImage = true;
+                    MessageBox.Show("Proyección encendida: esperando a que la imagen termine de descargarse...", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
                 }
+
+                // Si tenemos una URL de último click y no se ha descargado, iniciar descarga y proyectar cuando esté lista
+                if (_lastClickedImageUri != null)
+                {
+                    _isDownloadingImage = true;
+                    BitmapImage? bmp = null;
+                    try
+                    {
+                        var bytes = await s_http.GetByteArrayAsync(_lastClickedImageUri).ConfigureAwait(false);
+                        if (bytes != null)
+                        {
+                            var path = await SaveBytesToCacheAsync(bytes, Path.GetExtension(_lastClickedImageUri.LocalPath)).ConfigureAwait(false);
+                            if (!string.IsNullOrEmpty(path))
+                                bmp = LoadBitmapFromFileCached(path);
+                        }
+                    }
+                    catch { }
+                    _isDownloadingImage = false;
+
+                    if (bmp != null)
+                    {
+                        await Dispatcher.InvokeAsync(() =>
+                        {
+                            ImagesListBox.Items.Add(new CachedImage { FilePath = "", Image = bmp });
+                            ImagesListBox.SelectedItem = ImagesListBox.Items[ImagesListBox.Items.Count - 1];
+                            try { _onImageSelected?.Invoke(bmp); } catch { }
+                        });
+                        return;
+                    }
+                }
+
+                // Nada disponible
+                MessageBox.Show("No hay imagen seleccionada para proyectar. Selecciona una imagen en el inventario o en la previsualización.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
             {
-                // Al apagar: intentar notificar al MainWindow para desactivar la proyección
+                // Al apagar: notificar MainWindow para desactivar la proyección (si existe)
                 if (this.Owner is MainWindow mw)
                 {
                     try
@@ -77,7 +178,6 @@ namespace TMRJW
                         var projBtn = mw.FindName("BtnProyectarHDMI") as System.Windows.Controls.Button;
                         if (projBtn != null)
                         {
-                            // Disparar click en el botón del MainWindow para que su lógica de toggling se ejecute
                             projBtn.Dispatcher.Invoke(() => projBtn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)));
                         }
                     }
@@ -106,15 +206,11 @@ namespace TMRJW
                         }
                         else
                         {
-                            var bi = new BitmapImage();
-                            using var fs = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.Read);
-                            bi.BeginInit();
-                            bi.CacheOption = BitmapCacheOption.OnLoad;
-                            bi.StreamSource = fs;
-                            bi.EndInit();
-                            bi.Freeze();
-
-                            ImagesListBox.Items.Add(bi);
+                            // copiar al cache para uniformidad
+                            var bytes = File.ReadAllBytes(f);
+                            var path = SaveBytesToCacheAsync(bytes, Path.GetExtension(f)).GetAwaiter().GetResult();
+                            var bi = LoadBitmapFromFileCached(path);
+                            if (bi != null) ImagesListBox.Items.Add(new CachedImage { FilePath = path, Image = bi });
                         }
                     }
                 }
@@ -124,9 +220,22 @@ namespace TMRJW
 
         private void BtnTextoDelAnio_Click(object sender, RoutedEventArgs e)
         {
-            // Este botón proyecta el "Texto del Año" — implementar notificación a MainWindow o mostrar localmente
-            // Por ahora avisamos al usuario; la funcionalidad completa la implementaremos según tu preferencia (MainWindow/ProyeccionWindow).
-            MessageBox.Show("Acción: proyectar 'Texto del Año' (implementa la lógica que prefieras).", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+            // Intentar delegar a MainWindow si existe (dispara su botón de Texto del Año)
+            if (this.Owner is MainWindow mw)
+            {
+                try
+                {
+                    var btn = mw.FindName("BtnTextoDelAnio") as System.Windows.Controls.Button;
+                    if (btn != null)
+                    {
+                        btn.Dispatcher.Invoke(() => btn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)));
+                        return;
+                    }
+                }
+                catch { }
+            }
+
+            MessageBox.Show("Acción: proyectar 'Texto del Año' (no se encontró MainWindow).", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         // ---------------------------------------
@@ -289,6 +398,53 @@ namespace TMRJW
         {
             var (_, t) = EnsurePreviewTransforms();
             t.Y += 40;
+        }
+
+        // -------------------------
+        // Helpers para cache/IO
+        // -------------------------
+
+        private BitmapImage? LoadBitmapFromFileCached(string path)
+        {
+            try
+            {
+                var bi = new BitmapImage();
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    bi.BeginInit();
+                    bi.CacheOption = BitmapCacheOption.OnLoad;
+                    bi.StreamSource = fs;
+                    bi.EndInit();
+                    bi.Freeze();
+                }
+                return bi;
+            }
+            catch { return null; }
+        }
+
+        private async Task<string> SaveBytesToCacheAsync(byte[] bytes, string? extension)
+        {
+            try
+            {
+                var dir = GetCacheDirectory(); // GetCacheDirectory está en BrowserWindow.xaml.cs
+                Directory.CreateDirectory(dir);
+                string ext = string.IsNullOrWhiteSpace(extension) ? ".jpg" : extension;
+                if (!ext.StartsWith(".")) ext = "." + ext;
+                string fileName = Guid.NewGuid().ToString("N") + ext;
+                string path = Path.Combine(dir, fileName);
+                await File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false);
+                return path;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private string GetCacheDirectory()
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return Path.Combine(local, "TMRJW", "cache");
         }
     }
 }

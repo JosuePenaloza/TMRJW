@@ -1,4 +1,5 @@
-﻿using System;
+﻿JW\BrowserWindow.xaml.cs
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -14,6 +15,14 @@ using System.Runtime.InteropServices;
 
 namespace TMRJW
 {
+    // Pequeña clase para representar imágenes cacheadas en disco
+    internal class CachedImage
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public BitmapImage Image { get; set; } = null!;
+        public override string ToString() => Path.GetFileName(FilePath);
+    }
+
     // Objeto expuesto a JavaScript => debe ser COM visible
     [ComVisible(true)]
     public class ScriptBridge
@@ -31,19 +40,17 @@ namespace TMRJW
         private static readonly HttpClient s_http = new HttpClient();
 
         // Nuevos campos para coordinar descargas/proyección
-        private Uri? _lastClickedImageUri;
-        private bool _isDownloadingImage = false;
-        private bool _projectionWaitingForImage = false;
+        internal Uri? _lastClickedImageUri;
+        internal bool _isDownloadingImage = false;
+        internal bool _projectionWaitingForImage = false;
 
         public BrowserWindow()
         {
             InitializeComponent();
             UrlBox.Text = "https://wol.jw.org/es/wol/meetings/r4/lp-s/";
 
-            // Registrar handlers: selección actualiza solo previsualización; doble click/Enter proyectan.
-            ImagesListBox.SelectionChanged += ImagesListBox_SelectionChanged;
-            ImagesListBox.MouseDoubleClick += ImagesListBox_MouseDoubleClick;
-            ImagesListBox.KeyDown += ImagesListBox_KeyDown;
+            // permitir seleccionar con un solo click (MouseLeftButtonUp)
+            ImagesListBox.MouseLeftButtonUp += ImagesListBox_MouseLeftButtonUp;
 
             // silenciar errores de script en el WebBrowser
             WebBrowserControl.Navigated += WebBrowserControl_Navigated;
@@ -81,9 +88,6 @@ namespace TMRJW
             InjectClickScript(); // inyectar handlers para clicks dentro de la página
         }
 
-        // NOTE: handler BtnRefreshImages_Click está implementado en BrowserWindow.Events.cs
-        // para evitar definición duplicada lo eliminé de este archivo.
-
         private async Task RefreshImagesFromCurrentPageAsync()
         {
             _cts?.Cancel();
@@ -117,102 +121,37 @@ namespace TMRJW
             }
         }
 
-        // SELECTION CHANGED: actualizar solo la previsualización (NO proyectar)
-        private void ImagesListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                var selected = ImagesListBox.SelectedItem;
-                if (selected is BitmapImage bi)
-                {
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-                    PreviewImage.Visibility = Visibility.Visible;
-                    PreviewImage.Source = bi;
-                    TxtPreviewInfo.Text = "Vista previa: imagen seleccionada (single click)";
-                }
-                else if (selected is CachedImage ci)
-                {
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-                    PreviewImage.Visibility = Visibility.Visible;
-                    PreviewImage.Source = ci.Image;
-                    TxtPreviewInfo.Text = $"Vista previa: {Path.GetFileName(ci.FilePath)}";
-                }
-                else if (selected is string s && File.Exists(s))
-                {
-                    // posible vídeo (ruta como texto)
-                    PreviewImage.Visibility = Visibility.Collapsed;
-                    PreviewMedia.Visibility = Visibility.Visible;
-                    try { PreviewMedia.Source = new Uri(s); } catch { PreviewMedia.Source = null; }
-                    TxtPreviewInfo.Text = $"Vista previa: vídeo {Path.GetFileName(s)}";
-                }
-                else
-                {
-                    // limpiar previsualización
-                    PreviewMedia.Stop();
-                    PreviewMedia.Source = null;
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-                    PreviewImage.Source = null;
-                    PreviewImage.Visibility = Visibility.Visible;
-                    TxtPreviewInfo.Text = "Imagen / Video";
-                }
-            }
-            catch
-            {
-                // ignorar
-            }
-        }
-
-        // KeyDown en la lista: Enter proyecta (igual que doble click)
-        private void ImagesListBox_KeyDown(object? sender, KeyEventArgs e)
-        {
-            if (e.Key == Key.Enter)
-            {
-                TryProjectSelectedItem();
-                e.Handled = true;
-            }
-        }
-
-        // Doble click en inventario → proyectar (comportamiento requerido)
-        private void ImagesListBox_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
-        {
-            TryProjectSelectedItem();
-        }
-
-        // Helper que centraliza la lógica de proyectar el ítem seleccionado (invoca _onImageSelected solo aquí)
-        private void TryProjectSelectedItem()
-        {
-            var selected = ImagesListBox.SelectedItem;
-            if (selected == null) return;
-
-            BitmapImage? toProject = null;
-            if (selected is BitmapImage bi) toProject = bi;
-            else if (selected is CachedImage ci) toProject = ci.Image;
-            else if (selected is string s && File.Exists(s))
-            {
-                // si fuera ruta de imagen, intentar cargarla
-                try
-                {
-                    var bmp = LoadBitmapFromFileCached(s);
-                    if (bmp != null) toProject = bmp;
-                }
-                catch { }
-            }
-
-            if (toProject != null)
-            {
-                try
-                {
-                    // Asegurar invocación en el dispatcher (y que la acción sea la única responsable de proyectar)
-                    Dispatcher.Invoke(() => { try { _onImageSelected?.Invoke(toProject); } catch { } });
-                }
-                catch { }
-            }
-        }
-
-        // Mantener doble click por compatibilidad (ya existía) - vaciar si estaba definido anteriormente
+        // Click en inventario: solo previsualizar (no proyectar)
         private void ImagesListBox_MouseLeftButtonUp(object? sender, MouseButtonEventArgs e)
         {
-            // Intencionalmente vacío: la proyección se realiza solo en doble click o Enter.
+            var item = ImagesListBox.SelectedItem;
+            if (item is CachedImage ci)
+            {
+                try
+                {
+                    PreviewImage.Source = ci.Image;
+                }
+                catch { }
+            }
+            else if (item is BitmapImage bi)
+            {
+                // compatibilidad: si hay BitmapImage suelta
+                try { PreviewImage.Source = bi; } catch { }
+            }
+        }
+
+        // Doble click en inventario => proyectar (callback)
+        private void ImagesListBox_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            var item = ImagesListBox.SelectedItem;
+            if (item is CachedImage ci)
+            {
+                try { _onImageSelected?.Invoke(ci.Image); } catch { }
+            }
+            else if (item is BitmapImage bi)
+            {
+                try { _onImageSelected?.Invoke(bi); } catch { }
+            }
         }
 
         // Silenciar errores de script en el WebBrowser (usa ActiveX.Silent)
@@ -239,7 +178,7 @@ namespace TMRJW
         }
 
         // Método llamado por ScriptBridge cuando JS hace click en una imagen dentro de la página
-        // Guarda la última URL y descarga la imagen; añade al inventario, PERO NO INVOCARÁ LA PROYECCIÓN
+        // Ahora guarda la última URL, descarga, guarda en cache y añade al inventario; NO proyecta automáticamente.
         public async void OnImageUrlClicked(string url)
         {
             if (string.IsNullOrWhiteSpace(url)) return;
@@ -263,33 +202,42 @@ namespace TMRJW
                 _lastClickedImageUri = finalUri;
                 _isDownloadingImage = true;
 
-                var bmp = await DownloadBitmapFromUrlAsync(finalUri).ConfigureAwait(false);
-
+                // descargar bytes
+                byte[]? bytes = null;
+                try { bytes = await s_http.GetByteArrayAsync(finalUri).ConfigureAwait(false); } catch { bytes = null; }
                 _isDownloadingImage = false;
 
-                if (bmp != null)
+                if (bytes != null && bytes.Length > 0)
                 {
-                    await Dispatcher.InvokeAsync(() =>
+                    // guardar en cache y crear BitmapImage desde archivo cacheado
+                    var cachedPath = await SaveBytesToCacheAsync(bytes, Path.GetExtension(finalUri.LocalPath));
+                    if (!string.IsNullOrEmpty(cachedPath))
                     {
-                        try
+                        var bi = LoadBitmapFromFileCached(cachedPath);
+                        if (bi != null)
                         {
-                            // Añadir al inventario (append) COMO CachedImage para consistencia
-                            ImagesListBox.Items.Add(new CachedImage { FilePath = "", Image = bmp });
-
-                            // NOTA: No seleccionar ni invocar _onImageSelected para evitar proyección automática.
-                            // La proyección solo se disparará cuando el usuario haga doble click o presione Enter en el inventario (ImagesListBox).
+                            var ci = new CachedImage { FilePath = cachedPath, Image = bi };
+                            await Dispatcher.InvokeAsync(() =>
+                            {
+                                ImagesListBox.Items.Add(ci);
+                                ImagesListBox.SelectedItem = ci;
+                                PreviewImage.Source = ci.Image;
+                                // no llamamos al callback; proyección solo en doble click del inventario
+                                if (_projectionWaitingForImage)
+                                {
+                                    try { _onImageSelected?.Invoke(ci.Image); } catch { }
+                                    _projectionWaitingForImage = false;
+                                }
+                            });
+                            return;
                         }
-                        catch { }
-                    });
+                    }
                 }
-                else
+
+                await Dispatcher.InvokeAsync(() =>
                 {
-                    // no descargada
-                    await Dispatcher.InvokeAsync(() =>
-                    {
-                        MessageBox.Show("No se pudo descargar la imagen seleccionada desde la web.", "Error descarga", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    });
-                }
+                    MessageBox.Show("No se pudo descargar la imagen seleccionada desde la web.", "Error descarga", MessageBoxButton.OK, MessageBoxImage.Warning);
+                });
             }
             catch
             {
@@ -297,36 +245,47 @@ namespace TMRJW
             }
         }
 
-        private async Task<BitmapImage?> DownloadBitmapFromUrlAsync(Uri uri)
+        // Helper: carga BitmapImage desde archivo cache (OnLoad para liberar file handle)
+        private BitmapImage? LoadBitmapFromFileCached(string path)
         {
             try
             {
-                var bytes = await s_http.GetByteArrayAsync(uri).ConfigureAwait(false);
-                if (bytes == null || bytes.Length == 0) return null;
-
-                return await Task.Run(() =>
+                var bi = new BitmapImage();
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
-                    try
-                    {
-                        using var ms = new MemoryStream(bytes);
-                        var bi = new BitmapImage();
-                        bi.BeginInit();
-                        bi.CacheOption = BitmapCacheOption.OnLoad;
-                        bi.StreamSource = ms;
-                        bi.EndInit();
-                        bi.Freeze();
-                        return bi;
-                    }
-                    catch
-                    {
-                        return null;
-                    }
-                }).ConfigureAwait(false);
+                    bi.BeginInit();
+                    bi.CacheOption = BitmapCacheOption.OnLoad;
+                    bi.StreamSource = fs;
+                    bi.EndInit();
+                    bi.Freeze();
+                }
+                return bi;
             }
-            catch
+            catch { return null; }
+        }
+
+        // Guarda bytes en la carpeta de cache y devuelve la ruta
+        private async Task<string> SaveBytesToCacheAsync(byte[] bytes, string? extension)
+        {
+            try
             {
-                return null;
+                var dir = GetCacheDirectory();
+                Directory.CreateDirectory(dir);
+                string ext = string.IsNullOrWhiteSpace(extension) ? ".jpg" : extension;
+                if (!ext.StartsWith(".")) ext = "." + ext;
+                string fileName = Guid.NewGuid().ToString("N") + ext;
+                string path = Path.Combine(dir, fileName);
+                await File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false);
+                return path;
             }
+            catch { return string.Empty; }
+        }
+
+        // Obtiene la carpeta de cache (LocalApplicationData\TMRJW\cache)
+        private string GetCacheDirectory()
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return Path.Combine(local, "TMRJW", "cache");
         }
 
         // Inyecta un script sencillo que escucha clicks y llama a window.external.ImageClicked(url)
@@ -372,6 +331,21 @@ namespace TMRJW
             {
                 // ignorar
             }
+        }
+
+        // Exponer método para limpiar cache (se puede usar desde Ajustes)
+        public void ClearCache()
+        {
+            try
+            {
+                var dir = GetCacheDirectory();
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, true);
+                    Directory.CreateDirectory(dir);
+                }
+            }
+            catch { }
         }
     }
 }

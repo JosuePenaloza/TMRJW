@@ -5,9 +5,7 @@
         xmlns:local="clr-namespace:TMRJW"
         Title="Navegador" Height="680" Width="1100" MinWidth="900" MinHeight="520">
     <Window.Resources>
-        <!-- Plantilla única para miniaturas (soporta CachedImage y BitmapImage).
-             Usamos PriorityBinding: primero intenta {Binding Image} (CachedImage),
-             si es null, intenta el propio objeto ({Binding}) para BitmapImage. -->
+        <!-- Plantilla única para miniaturas (soporta CachedImage y BitmapImage) -->
         <DataTemplate x:Key="ThumbnailTemplate">
             <Border Margin="6" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1"
                     Padding="6" MinWidth="120" MinHeight="150"
@@ -17,7 +15,7 @@
                         <Image.Source>
                             <PriorityBinding>
                                 <Binding Path="Image" />
-                                <Binding /> <!-- binding al propio item (BitmapImage) -->
+                                <Binding /> <!-- si el item es BitmapImage -->
                             </PriorityBinding>
                         </Image.Source>
                     </Image>
@@ -61,7 +59,7 @@
             <ColumnDefinition Width="0.45*" />
         </Grid.ColumnDefinitions>
 
-        <!-- LEFT: Navegador -->
+        <!-- LEFT: Navegador (sin cambios) -->
         <Grid x:Name="PrincipalNavegacion" Grid.Column="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -121,38 +119,10 @@
                         Height="32" MinWidth="140" Click="BtnTextoDelAnio_Click" ToolTip="Proyectar Texto del Año" HorizontalAlignment="Right"/>
             </Grid>
 
-            <TabControl Grid.Row="1" Height="36" Margin="0,0,0,6" Background="#FFE6F0" BorderBrush="#FFD6E8">
-                <TabItem Header="Todas" />
-            </TabControl>
+            <!-- Pestañas del inventario: aquí se crean dinámicamente desde code-behind -->
+            <TabControl x:Name="InventoryTabs" Grid.Row="1" Grid.RowSpan="2" Margin="0,0,0,6" />
 
-            <Border Grid.Row="2" Background="#F3F3F3" BorderBrush="#CCC" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Text="INVENTARIO DE IMÁGENES" FontWeight="Bold" Margin="0,0,0,8" Grid.Row="0"/>
-
-                    <!-- ListBox: asignamos ItemTemplate para evitar resolución de tipos en XAML -->
-                    <ListBox x:Name="ImagesListBox"
-                             Grid.Row="1"
-                             ItemTemplate="{StaticResource ThumbnailTemplate}"
-                             HorizontalContentAlignment="Stretch"
-                             VerticalContentAlignment="Top"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.CanContentScroll="False"
-                             SelectionMode="Single">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel IsItemsHost="True" Orientation="Horizontal"/>
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                    </ListBox>
-                </Grid>
-            </Border>
-
+            <!-- Preview y controles (sin cambios) -->
             <Border Grid.Row="3" Background="#E8F7FF" BorderBrush="#BEE6FF" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,8,0,6">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -176,6 +146,7 @@
                 </Grid>
             </Border>
 
+            <!-- Botones de zoom/pan/reset (sin cambios) -->
             <Border Grid.Row="4" Background="#FFFFFF" CornerRadius="4" BorderBrush="#C7A77B" BorderThickness="1" Padding="6" Margin="0,0,0,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Margin="0,0,12,0" x:Name="ZoomButtonsPanel" VerticalAlignment="Center">

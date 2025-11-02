@@ -8,7 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using System.Collections.Generic;
-using System.Windows.Controls; // para WrapPanel
+using System.Windows.Controls; // añadido para WrapPanel, ListBox
 
 namespace TMRJW
 {
@@ -52,18 +52,15 @@ namespace TMRJW
                 var imagesList = new List<(Uri Uri, byte[]? Bytes)>();
                 foreach (var u in uris)
                 {
-                    try
-                    {
-                        var bytes = await s_http.GetByteArrayAsync(u).ConfigureAwait(false);
-                        imagesList.Add((u, bytes));
-                    }
-                    catch
-                    {
-                        imagesList.Add((u, null));
-                    }
+                    try { var bytes = await s_http.GetByteArrayAsync(u).ConfigureAwait(false); imagesList.Add((u, bytes)); }
+                    catch { imagesList.Add((u, null)); }
                 }
 
                 var added = 0;
+                var pageUri = new Uri(url);
+                string tabKey = $"Web: {pageUri.Host}";
+                EnsureTabExists(tabKey, tabKey);
+
                 await Dispatcher.InvokeAsync(() =>
                 {
                     foreach (var item in imagesList)
@@ -79,7 +76,7 @@ namespace TMRJW
                                 if (bi != null)
                                 {
                                     var ci = new CachedImage { FilePath = path, Image = bi };
-                                    ImagesListBox.Items.Add(ci);
+                                    AddImageToTab(tabKey, ci);
                                     added++;
                                 }
                             }
@@ -87,9 +84,6 @@ namespace TMRJW
                         catch { }
                     }
                     MessageBox.Show($"Capturadas {added} imágenes y añadidas al inventario.", "Captura completa", MessageBoxButton.OK, MessageBoxImage.Information);
-
-                    // Ajustar miniaturas tras añadir
-                    try { UpdateWrapPanelItemSize(); } catch { }
                 });
             }
             catch
@@ -110,9 +104,9 @@ namespace TMRJW
                 // Intentar obtener imagen local inmediata
                 BitmapImage? imgToProject = null;
 
-                if (ImagesListBox.SelectedItem is CachedImage ciSel)
+                if (ImagesListBox?.SelectedItem is CachedImage ciSel)
                     imgToProject = ciSel.Image;
-                else if (ImagesListBox.SelectedItem is BitmapImage biSel)
+                else if (ImagesListBox?.SelectedItem is BitmapImage biSel)
                     imgToProject = biSel;
                 else if (PreviewImage?.Source is BitmapImage previewBI)
                     imgToProject = previewBI;
@@ -153,8 +147,7 @@ namespace TMRJW
                     {
                         await Dispatcher.InvokeAsync(() =>
                         {
-                            ImagesListBox.Items.Add(new CachedImage { FilePath = "", Image = bmp });
-                            ImagesListBox.SelectedItem = ImagesListBox.Items[ImagesListBox.Items.Count - 1];
+                            AddImageToTab(DefaultTabKey, new CachedImage { FilePath = "", Image = bmp });
                             try { _onImageSelected?.Invoke(bmp); } catch { }
                         });
                         return;
@@ -182,31 +175,41 @@ namespace TMRJW
             }
         }
 
+        // BtnLoadExtra: ahora agrupa por carpeta y crea pestaña "Carpeta: <nombre>"
         private void BtnLoadExtra_Click(object sender, RoutedEventArgs e)
         {
-            // Abrir selector de archivos y añadir imágenes al inventario simple
             var dlg = new OpenFileDialog { Multiselect = true, Filter = "Imágenes|*.jpg;*.jpeg;*.png;*.bmp;*.gif|Videos|*.mp4;*.wmv;*.avi" };
             if (dlg.ShowDialog() != true) return;
+
+            string? folder = null;
+            if (dlg.FileNames.Length > 0) folder = Path.GetDirectoryName(dlg.FileNames[0]);
+
+            string tabKey = folder != null ? $"Carpeta: {Path.GetFileName(folder)}" : "Carpeta: Varios";
+            EnsureTabExists(tabKey, tabKey);
 
             foreach (var f in dlg.FileNames)
             {
                 try
                 {
-                    if (File.Exists(f))
+                    if (!File.Exists(f)) continue;
+
+                    if (f.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) ||
+                        f.EndsWith(".wmv", StringComparison.OrdinalIgnoreCase) ||
+                        f.EndsWith(".avi", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (f.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) ||
-                            f.EndsWith(".wmv", StringComparison.OrdinalIgnoreCase) ||
-                            f.EndsWith(".avi", StringComparison.OrdinalIgnoreCase))
+                        // vídeos: añadir como ruta (o adaptar según tu lógica)
+                        AddImageToTab(tabKey, f);
+                    }
+                    else
+                    {
+                        // copiar al cache para uniformidad
+                        var bytes = File.ReadAllBytes(f);
+                        var path = SaveBytesToCacheAsync(bytes, Path.GetExtension(f)).GetAwaiter().GetResult();
+                        var bi = LoadBitmapFromFileCached(path);
+                        if (bi != null)
                         {
-                            ImagesListBox.Items.Add(System.IO.Path.GetFileName(f) + " (video)");
-                        }
-                        else
-                        {
-                            // copiar al cache para uniformidad
-                            var bytes = File.ReadAllBytes(f);
-                            var path = SaveBytesToCacheAsync(bytes, Path.GetExtension(f)).GetAwaiter().GetResult();
-                            var bi = LoadBitmapFromFileCached(path);
-                            if (bi != null) ImagesListBox.Items.Add(new CachedImage { FilePath = path, Image = bi });
+                            var ci = new CachedImage { FilePath = path, Image = bi };
+                            AddImageToTab(tabKey, ci);
                         }
                     }
                 }
@@ -271,17 +274,24 @@ namespace TMRJW
                         }
                     }
                     catch { }
-                    try { ImagesListBox.Items.Remove(ci); } catch { }
+                    // quitar de todas las colecciones donde aparezca
+                    foreach (var k in _tabCollections.Keys.ToArray())
+                    {
+                        try { _tabCollections[k].Remove(ci); } catch { }
+                    }
 
                     // ajustar layout
                     try { UpdateWrapPanelItemSize(); } catch { }
                     return;
                 }
 
-                // Si es BitmapImage o string, simplemente remover el item
+                // Si es BitmapImage o string, quitar de las colecciones
                 try
                 {
-                    ImagesListBox.Items.Remove(item);
+                    foreach (var k in _tabCollections.Keys.ToArray())
+                    {
+                        try { _tabCollections[k].Remove(item); } catch { }
+                    }
                     try { UpdateWrapPanelItemSize(); } catch { }
                 }
                 catch { }

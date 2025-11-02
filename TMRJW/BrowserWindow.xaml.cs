@@ -35,6 +35,11 @@ namespace TMRJW
         private bool _isDownloadingImage = false;
         private bool _projectionWaitingForImage = false;
 
+        // Campos para interacción con previsualización (zoom/pan con tecla Espacio)
+        private bool _isSpacePressed = false;
+        private bool _isPanningPreview = false;
+        private Point _lastPreviewMousePos;
+
         public BrowserWindow()
         {
             InitializeComponent();
@@ -44,6 +49,24 @@ namespace TMRJW
             ImagesListBox.SelectionChanged += ImagesListBox_SelectionChanged;
             ImagesListBox.MouseDoubleClick += ImagesListBox_MouseDoubleClick;
             ImagesListBox.KeyDown += ImagesListBox_KeyDown;
+
+            // Registrar eventos para interacción con PreviewImage (zoom/pan con Espacio)
+            this.PreviewKeyDown += Window_PreviewKeyDown;
+            this.PreviewKeyUp += Window_PreviewKeyUp;
+
+            // PreviewImage puede no ser focusable por defecto; permitir eventos de ratón
+            try
+            {
+                PreviewImage.Focusable = true;
+                PreviewImage.MouseWheel += PreviewImage_MouseWheel;
+                PreviewImage.MouseDown += PreviewImage_MouseDown;
+                PreviewImage.MouseMove += PreviewImage_MouseMove;
+                PreviewImage.MouseUp += PreviewImage_MouseUp;
+            }
+            catch
+            {
+                // ignorar si algún control no existe en tiempo de diseño
+            }
 
             // silenciar errores de script en el WebBrowser
             WebBrowserControl.Navigated += WebBrowserControl_Navigated;
@@ -129,6 +152,9 @@ namespace TMRJW
                     PreviewImage.Visibility = Visibility.Visible;
                     PreviewImage.Source = bi;
                     TxtPreviewInfo.Text = "Vista previa: imagen seleccionada (single click)";
+
+                    // Reset transforms de preview para evitar sorpresas al seleccionar nueva imagen
+                    try { BtnResetZoom_Click(null, null); } catch { }
                 }
                 else if (selected is CachedImage ci)
                 {
@@ -136,6 +162,8 @@ namespace TMRJW
                     PreviewImage.Visibility = Visibility.Visible;
                     PreviewImage.Source = ci.Image;
                     TxtPreviewInfo.Text = $"Vista previa: {Path.GetFileName(ci.FilePath)}";
+
+                    try { BtnResetZoom_Click(null, null); } catch { }
                 }
                 else if (selected is string s && File.Exists(s))
                 {
@@ -213,6 +241,129 @@ namespace TMRJW
         private void ImagesListBox_MouseLeftButtonUp(object? sender, MouseButtonEventArgs e)
         {
             // Intencionalmente vacío: la proyección se realiza solo en doble click o Enter.
+        }
+
+        // ---------------------------
+        // Interacción Preview: Espacio + rueda/arrastre
+        // ---------------------------
+
+        private void Window_PreviewKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Space && !_isSpacePressed)
+            {
+                _isSpacePressed = true;
+                Mouse.OverrideCursor = Cursors.SizeAll;
+            }
+        }
+
+        private void Window_PreviewKeyUp(object? sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Space)
+            {
+                _isSpacePressed = false;
+                _isPanningPreview = false;
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        private void PreviewImage_MouseWheel(object? sender, MouseWheelEventArgs e)
+        {
+            if (!_isSpacePressed) return; // solo cuando se mantiene espacio
+
+            try
+            {
+                var (s, t) = EnsurePreviewTransforms(); // método en BrowserWindow.Events.cs
+                double oldScale = s.ScaleX;
+                double delta = e.Delta > 0 ? ZoomStep : -ZoomStep;
+                double newScale = Math.Max(0.2, Math.Min(5.0, oldScale + delta));
+                if (Math.Abs(newScale - oldScale) < 0.0001) return;
+
+                var pos = e.GetPosition(PreviewImage);
+
+                double scaleFactor = newScale / oldScale;
+
+                // Ajustar translate para mantener el punto bajo el cursor
+                t.X = (1 - scaleFactor) * pos.X + scaleFactor * t.X;
+                t.Y = (1 - scaleFactor) * pos.Y + scaleFactor * t.Y;
+
+                s.ScaleX = newScale;
+                s.ScaleY = newScale;
+
+                // Propagar la transformación a la proyección (si hay ventana de proyección abierta)
+                SyncProjectionTransform(newScale, t.X, t.Y);
+
+                e.Handled = true;
+            }
+            catch
+            {
+                // ignorar
+            }
+        }
+
+        private void PreviewImage_MouseDown(object? sender, MouseButtonEventArgs e)
+        {
+            if (!_isSpacePressed) return;
+
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningPreview = true;
+                _lastPreviewMousePos = e.GetPosition(PreviewImage);
+                try { Mouse.Capture(PreviewImage); } catch { }
+            }
+        }
+
+        private void PreviewImage_MouseMove(object? sender, MouseEventArgs e)
+        {
+            if (!_isSpacePressed || !_isPanningPreview) return;
+
+            try
+            {
+                var pos = e.GetPosition(PreviewImage);
+                var dx = pos.X - _lastPreviewMousePos.X;
+                var dy = pos.Y - _lastPreviewMousePos.Y;
+                _lastPreviewMousePos = pos;
+
+                var (_, t) = EnsurePreviewTransforms();
+                t.X += dx;
+                t.Y += dy;
+
+                // Propagar cambios a la proyección
+                var s = (EnsurePreviewTransforms().scale.ScaleX);
+                SyncProjectionTransform(s, t.X, t.Y);
+            }
+            catch
+            {
+                // ignorar
+            }
+        }
+
+        private void PreviewImage_MouseUp(object? sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                _isPanningPreview = false;
+                try { Mouse.Capture(null); } catch { }
+            }
+        }
+
+        // Buscar instancias de ProyeccionWindow y actualizar sus transformaciones
+        private void SyncProjectionTransform(double scale, double offsetX, double offsetY)
+        {
+            try
+            {
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw)
+                    {
+                        try
+                        {
+                            pw.UpdateImageTransform(scale, offsetX, offsetY);
+                        }
+                        catch { /* ignorar errores de sincronización */ }
+                    }
+                }
+            }
+            catch { }
         }
 
         // Silenciar errores de script en el WebBrowser (usa ActiveX.Silent)

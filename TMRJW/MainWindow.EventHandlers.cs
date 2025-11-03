@@ -53,12 +53,6 @@ namespace TMRJW
 
                         if (listaVideos != null)
                         {
-                            // Asegurar ItemTemplate y añadir item
-                            if (listaVideos.ItemTemplate == null)
-                            {
-                                // Dejar como está: la UI principal puede usar DataTemplate declarada.
-                            }
-
                             listaVideos.Items.Add(vi);
 
                             // Generar thumbnail de frame en background
@@ -66,7 +60,7 @@ namespace TMRJW
                             {
                                 try
                                 {
-                                    var generated = await GenerateVideoFrameThumbnailAsync(ruta, 160, 90);
+                                    var generated = await GenerateVideoFrameThumbnailAsync(ruta,160,90);
                                     if (generated != null)
                                     {
                                         Application.Current.Dispatcher.Invoke(() =>
@@ -74,12 +68,16 @@ namespace TMRJW
                                             vi.Thumbnail = generated;
                                             // Forzar refresh de item si es necesario
                                             var idx = listaVideos.Items.IndexOf(vi);
-                                            if (idx >= 0)
+                                            if (idx >=0)
                                             {
                                                 listaVideos.Items.RemoveAt(idx);
                                                 listaVideos.Items.Insert(idx, vi);
                                             }
                                         });
+                                    }
+                                    else
+                                    {
+                                        // no generado: mantener icono
                                     }
                                 }
                                 catch { }
@@ -93,7 +91,7 @@ namespace TMRJW
                 if (listaVideos != null)
                 {
                     UpdateWrapPanelItemSize(listaVideos);
-                    if (listaVideos.SelectedItem == null && _videos.Count > 0) listaVideos.SelectedItem = _videos[0];
+                    if (listaVideos.SelectedItem == null && _videos.Count >0) listaVideos.SelectedItem = _videos[0];
                 }
             }
             catch (Exception ex)
@@ -113,12 +111,25 @@ namespace TMRJW
                 var res = MessageBox.Show($"¿Eliminar el vídeo '{vi.FileName}' de la lista?", "Eliminar vídeo", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (res != MessageBoxResult.Yes) return;
 
+                // Eliminar de la colección interna
                 var toRemove = _videos.Where(v => string.Equals(v.FilePath, vi.FilePath, StringComparison.OrdinalIgnoreCase)).ToList();
                 foreach (var r in toRemove) _videos.Remove(r);
 
+                // Eliminar de la UI (ListaVideos.Items) si existe
                 var listaVideos = FindControl<ListBox>("ListaVideos");
-                if (listaVideos != null) UpdateWrapPanelItemSize(listaVideos);
+                if (listaVideos != null)
+                {
+                    try
+                    {
+                        var itemsToRemove = listaVideos.Items.OfType<VideoItem>().Where(v => string.Equals(v.FilePath, vi.FilePath, StringComparison.OrdinalIgnoreCase)).ToList();
+                        foreach (var it in itemsToRemove) listaVideos.Items.Remove(it);
+                    }
+                    catch { }
 
+                    UpdateWrapPanelItemSize(listaVideos);
+                }
+
+                // Eliminar del listado de programa si aparece
                 var listaPrograma = FindControl<ListBox>("ListaPrograma");
                 if (listaPrograma != null)
                 {

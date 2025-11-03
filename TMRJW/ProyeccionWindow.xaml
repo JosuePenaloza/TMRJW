@@ -1,65 +1,29 @@
 ﻿<Window x:Class="TMRJW.ProyeccionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Proyección de Medios"
+        Title="Proyección"
         WindowStyle="None"
         WindowState="Maximized"
-        Background="Black"
-        Loaded="Window_Loaded">
+        Background="Black">
 
-    <Grid x:Name="LayoutRoot" 
-          Background="Black"
-          IsHitTestVisible="False"
-          MouseDown="LayoutRoot_MouseDown"
-          MouseMove="LayoutRoot_MouseMove"
-          MouseUp="LayoutRoot_MouseUp"
-          MouseWheel="LayoutRoot_MouseWheel">
+    <Grid x:Name="LayoutRoot">
 
-        <!-- MediaElement para reproducir video (oculto por defecto) -->
-        <MediaElement x:Name="mediaElement"
-                      LoadedBehavior="Manual"
-                      UnloadedBehavior="Manual"
+        <!-- Doble buffer: dos Image apiladas; alternativamente se intercambian para cross-fade -->
+        <Image x:Name="ProjectionImageA" 
+               Stretch="Uniform" 
+               RenderOptions.BitmapScalingMode="HighQuality"/>
+
+        <Image x:Name="ProjectionImageB" 
+               Stretch="Uniform" 
+               RenderOptions.BitmapScalingMode="HighQuality" 
+               Opacity="0"/>
+
+        <!-- MediaElement oculto por defecto; usado cuando se proyecta vídeo -->
+        <MediaElement x:Name="ProjectionMedia"
                       Stretch="Uniform"
-                      Visibility="Collapsed"/>
-
-        <!-- Imagen de proyección -->
-        <Image x:Name="imageDisplay" 
-               HorizontalAlignment="Center" 
-               VerticalAlignment="Center"
-               Stretch="Uniform"
-               RenderTransformOrigin="0.5,0.5"
-               IsHitTestVisible="False">
-            <Image.RenderTransform>
-                <TransformGroup>
-                    <ScaleTransform x:Name="ScaleTransform" />
-                    <TranslateTransform x:Name="TranslateTransform" />
-                </TransformGroup>
-            </Image.RenderTransform>
-        </Image>
-
-        <!-- Texto superpuesto (oculto por defecto) -->
-        <TextBlock x:Name="textDisplay"
-                   Foreground="White"
-                   FontSize="36"
-                   TextWrapping="Wrap"
-                   Visibility="Collapsed"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center"
-                   TextAlignment="Center"
-                   Margin="40"/>
-
-        <!-- Barra de controles básicos para video -->
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,16" Background="#22000000">
-            <!-- Si necesitas espacio interno, usa un elemento contenedor como Border -->
-            <Border Padding="6" Background="Transparent">
-                <StackPanel Orientation="Horizontal">
-                    <Button x:Name="BtnPlayPause" Width="60" Height="30" Margin="6" Click="BtnPlayPause_Click" Visibility="Collapsed">Play</Button>
-                    <Button x:Name="BtnStop" Width="60" Height="30" Margin="6" Click="BtnStop_Click" Visibility="Collapsed">Stop</Button>
-                    
-                    <Slider x:Name="VolumeSlider" Visibility="Collapsed" Minimum="0" Maximum="100" />
-                </StackPanel>
-            </Border>
-        </StackPanel>
-
+                      LoadedBehavior="Manual"
+                      UnloadedBehavior="Stop"
+                      Visibility="Collapsed"
+                      IsHitTestVisible="False"/>
     </Grid>
 </Window>

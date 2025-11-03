@@ -1,288 +1,302 @@
 ﻿using System;
 using System.Windows;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 
 namespace TMRJW
 {
     public partial class ProyeccionWindow : Window
     {
-        private const double MinScale = 0.2;
-        private const double MaxScale = 5.0;
-        private const double ScaleStep = 0.1;
+        private Image _front => _frontIsA ? ProjectionImageA : ProjectionImageB;
+        private Image _back => _frontIsA ? ProjectionImageB : ProjectionImageA;
+        private bool _frontIsA = true;
+        private readonly TimeSpan _fadeDuration = TimeSpan.FromMilliseconds(180);
 
-        private double _currentScale = 1.0;
-        private Point _lastMousePosition;
-        private bool _isPanning = false;
         private bool _isPlayingVideo = false;
-
-        // Exponer estado público para que MainWindow pueda consultar/alternar
-        public bool IsPlayingVideo => _isPlayingVideo;
 
         public ProyeccionWindow()
         {
             InitializeComponent();
 
-            // Ocultar controles para que la ventana proyectada solo muestre la imagen/video sin superposiciones
+            // Mejorar rendimiento y reducir parpadeos
             try
             {
-                if (BtnPlayPause != null) BtnPlayPause.Visibility = Visibility.Collapsed;
-                if (BtnStop != null) BtnStop.Visibility = Visibility.Collapsed;
-                if (VolumeSlider != null) VolumeSlider.Visibility = Visibility.Collapsed;
+                ProjectionImageA.CacheMode = new BitmapCache();
+                ProjectionImageB.CacheMode = new BitmapCache();
+                ProjectionImageA.SnapsToDevicePixels = true;
+                ProjectionImageB.SnapsToDevicePixels = true;
+                UseLayoutRounding = true;
 
-                // Desactivar interacción directa sobre la imagen en la ventana de proyección
-                if (imageDisplay != null) imageDisplay.IsHitTestVisible = false;
-                if (LayoutRoot != null) LayoutRoot.IsHitTestVisible = false;
-            }
-            catch { }
-
-            // Asegurar que el Image use las transformaciones que definimos en XAML
-            if (imageDisplay != null)
-            {
-                var tg = new TransformGroup();
-                tg.Children.Add(ScaleTransform);
-                tg.Children.Add(TranslateTransform);
-                imageDisplay.RenderTransform = tg;
-                imageDisplay.RenderTransformOrigin = new Point(0.0, 0.0);
-            }
-
-            // Inicial volumen
-            try
-            {
-                if (mediaElement != null) mediaElement.Volume = (VolumeSlider?.Value ?? 75) / 100.0;
+                RenderOptions.SetBitmapScalingMode(ProjectionImageA, BitmapScalingMode.HighQuality);
+                RenderOptions.SetBitmapScalingMode(ProjectionImageB, BitmapScalingMode.HighQuality);
             }
             catch { }
         }
 
+        // Cross-fade sin dejar frame en negro; acepta BitmapImage ya congelado (Freeze).
         public void MostrarImagenTexto(BitmapImage imagen)
         {
-            if (mediaElement != null)
-            {
-                try { mediaElement.Stop(); } catch { }
-                mediaElement.Visibility = Visibility.Collapsed;
-                _isPlayingVideo = false;
-                BtnPlayPause.Content = "Play";
-            }
+            if (imagen == null) return;
 
-            if (imageDisplay != null)
-            {
-                imageDisplay.Source = imagen;
-                imageDisplay.Visibility = Visibility.Visible;
-                ResetTransform();
-            }
-
-            if (textDisplay != null)
-            {
-                textDisplay.Text = string.Empty;
-                textDisplay.Visibility = Visibility.Collapsed;
-            }
-        }
-
-        public void MostrarTextoPrograma(string contenido)
-        {
-            if (mediaElement != null)
-            {
-                try { mediaElement.Stop(); } catch { }
-                mediaElement.Visibility = Visibility.Collapsed;
-                _isPlayingVideo = false;
-                BtnPlayPause.Content = "Play";
-            }
-
-            if (imageDisplay != null)
-            {
-                imageDisplay.Source = null;
-                imageDisplay.Visibility = Visibility.Collapsed;
-            }
-
-            if (textDisplay != null)
-            {
-                textDisplay.Text = contenido;
-                textDisplay.Visibility = Visibility.Visible;
-            }
-
-            ResetTransform();
-        }
-
-        // Reproducir video en la ventana de proyección (MediaElement en XAML)
-        public void MostrarVideo(string rutaArchivo)
-        {
-            if (!System.IO.File.Exists(rutaArchivo)) throw new ArgumentException("Archivo no encontrado", nameof(rutaArchivo));
-
-            if (imageDisplay != null) imageDisplay.Visibility = Visibility.Collapsed;
-            if (textDisplay != null) textDisplay.Visibility = Visibility.Collapsed;
-
-            if (mediaElement == null) return;
-
+            // Asegurar que la imagen está congelada para evitar problemas de rendering
             try
             {
-                mediaElement.Source = new Uri(rutaArchivo);
-                mediaElement.Visibility = Visibility.Visible;
-                mediaElement.Stop();
-                mediaElement.Play();
-                _isPlayingVideo = true;
-                BtnPlayPause.Content = "Pause";
+                if (imagen.CanFreeze && !imagen.IsFrozen)
+                    imagen.Freeze();
             }
-            catch (Exception ex)
+            catch { }
+
+            // Si hay vídeo en reproducción, detenerlo y ocultar media
+            try { StopVideo(); } catch { }
+
+            // Asegurarse de ejecutar en el hilo de UI
+            Dispatcher.BeginInvoke((Action)(() =>
             {
-                throw new InvalidOperationException("Error al reproducir video", ex);
-            }
+                try
+                {
+                    // Cancelar cualquier animación previa para evitar estados inconsistentes
+                    try
+                    {
+                        _front.BeginAnimation(UIElement.OpacityProperty, null);
+                        _back.BeginAnimation(UIElement.OpacityProperty, null);
+                    }
+                    catch { }
+
+                    // Asegurar que ambas imágenes están visibles para el cross-fade
+                    ProjectionImageA.Visibility = Visibility.Visible;
+                    ProjectionImageB.Visibility = Visibility.Visible;
+
+                    // Si es la primera imagen (front no tiene Source) simplemente asignarla sin animación
+                    if (_front.Source == null && (_back.Source == null))
+                    {
+                        _front.Source = imagen;
+                        _front.Opacity = 1.0;
+                        _back.Source = null;
+                        _back.Opacity = 0.0;
+                        return;
+                    }
+
+                    // Si la imagen a mostrar ya está en front/back, evitar recrear animación innecesaria
+                    if (ReferenceEquals(_front.Source, imagen) || ReferenceEquals(_back.Source, imagen))
+                    {
+                        // Si ya está en back pero no visible, forzar swap inmediato si es necesario
+                        if (ReferenceEquals(_back.Source, imagen) && _back.Opacity < 0.5)
+                        {
+                            _back.Opacity = 1.0;
+                            _front.Opacity = 0.0;
+                            _frontIsA = !_frontIsA;
+                        }
+                        return;
+                    }
+
+                    // Asegurar z-order: colocar el buffer trasero por encima durante la transición
+                    try { Panel.SetZIndex(_back, 1); Panel.SetZIndex(_front, 0); } catch { }
+
+                    // Colocar la nueva imagen en el buffer trasero
+                    _back.Source = imagen;
+                    _back.Opacity = 0.0;
+                    ProjectionMedia.Visibility = Visibility.Collapsed;
+
+                    // Forzar layout/render antes de empezar la animación para que el back tenga su frame listo
+                    try
+                    {
+                        // Solicitar render immediato
+                        Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
+                        _back.UpdateLayout();
+                        _front.UpdateLayout();
+                    }
+                    catch { }
+
+                    // Forzar valores iniciales (por si el sistema los dejó entremedias)
+                    _back.Visibility = Visibility.Visible;
+                    _front.Visibility = Visibility.Visible;
+                    _front.Opacity = 1.0;
+
+                    // Preparar animación: front opa 1 -> 0, back opa 0 -> 1
+                    var fadeOut = new DoubleAnimation(1.0, 0.0, new Duration(_fadeDuration)) { FillBehavior = FillBehavior.HoldEnd };
+                    var fadeIn  = new DoubleAnimation(0.0, 1.0, new Duration(_fadeDuration)) { FillBehavior = FillBehavior.HoldEnd };
+
+                    // Aplicar al back (subirá) y front (bajará)
+                    _back.BeginAnimation(UIElement.OpacityProperty, fadeIn);
+                    _front.BeginAnimation(UIElement.OpacityProperty, fadeOut);
+
+                    // Al finalizar la animación, normalizar y alternar referencias
+                    fadeIn.Completed += (s, e) =>
+                    {
+                        try
+                        {
+                            // Quitar animaciones
+                            _front.BeginAnimation(UIElement.OpacityProperty, null);
+                            _back.BeginAnimation(UIElement.OpacityProperty, null);
+
+                            // Establecer opacidades finales explícitamente
+                            _back.Opacity = 1.0;
+                            _front.Opacity = 0.0;
+
+                            // Alternar buffers: el que antes era back ahora será front lógicamente
+                            _frontIsA = !_frontIsA;
+
+                            // Asegurar que el visible (nuevo front) tenga opacidad1
+                            _front.Opacity = 1.0;
+                            _back.Opacity = 0.0;
+
+                            // Reset z-order
+                            try { Panel.SetZIndex(_front, 1); Panel.SetZIndex(_back, 0); } catch { }
+
+                            // No borrar Source para evitar frames en negro; mantener en memoria
+                        }
+                        catch
+                        {
+                            // Fallback simple: asignación directa sin animación si algo falla
+                            try { _front.BeginAnimation(UIElement.OpacityProperty, null); _back.BeginAnimation(UIElement.OpacityProperty, null); } catch { }
+                            _front.Source = imagen;
+                            _front.Opacity = 1.0;
+                            _back.Opacity = 0.0;
+                        }
+                    };
+                }
+                catch
+                {
+                    // Fallback simple: asignación directa sin animación si algo falla
+                    try { _front.BeginAnimation(UIElement.OpacityProperty, null); _back.BeginAnimation(UIElement.OpacityProperty, null); } catch { }
+                    _front.Source = imagen;
+                    _front.Opacity = 1.0;
+                    _back.Source = null;
+                    _back.Opacity = 0.0;
+                }
+            }), DispatcherPriority.Normal);
         }
 
-        // Métodos de control de video expuestos
-        public void SetVolume(double volume)
+        // Actualiza transform (escala + traslación) aplicados a imágenes y media (para sincronizar zoom/pan)
+        // Firma existente que acepta escala X/Y y traslación X/Y
+        public void UpdateImageTransform(double scaleX = 1.0, double scaleY = 1.0, double translateX = 0.0, double translateY = 0.0)
         {
-            if (mediaElement != null)
+            Dispatcher.BeginInvoke((Action)(() =>
             {
-                mediaElement.Volume = Math.Max(0.0, Math.Min(1.0, volume));
-                if (VolumeSlider != null) VolumeSlider.Value = mediaElement.Volume * 100;
+                var tg = new TransformGroup();
+                tg.Children.Add(new ScaleTransform(scaleX, scaleY));
+                tg.Children.Add(new TranslateTransform(translateX, translateY));
+                ApplyRenderTransformToVisuals(tg);
+            }), DispatcherPriority.Normal);
+        }
+
+        // Nueva sobrecarga para compatibilidad con llamadas existentes que pasan (scale, tx, ty)
+        public void UpdateImageTransform(double scale, double translateX, double translateY)
+        {
+            UpdateImageTransform(scale, scale, translateX, translateY);
+        }
+
+        // Sobrecarga que acepta transforms ya construidos
+        public void UpdateImageTransform(ScaleTransform scaleTransform, TranslateTransform translateTransform)
+        {
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                var tg = new TransformGroup();
+                tg.Children.Add(scaleTransform ?? new ScaleTransform(1,1));
+                tg.Children.Add(translateTransform ?? new TranslateTransform(0,0));
+                ApplyRenderTransformToVisuals(tg);
+            }), DispatcherPriority.Normal);
+        }
+
+        private void ApplyRenderTransformToVisuals(Transform transform)
+        {
+            try
+            {
+                ProjectionImageA.RenderTransformOrigin = new Point(0.5,0.5);
+                ProjectionImageB.RenderTransformOrigin = new Point(0.5,0.5);
+                ProjectionMedia.RenderTransformOrigin = new Point(0.5,0.5);
+
+                ProjectionImageA.RenderTransform = transform;
+                ProjectionImageB.RenderTransform = transform;
+                ProjectionMedia.RenderTransform = transform;
             }
+            catch { }
+        }
+
+        // ------------------ Video control helpers (API simple usada por MainWindow) ------------------
+
+        public void PlayVideo(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return;
+            try
+            {
+                Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    try
+                    {
+                        ProjectionMedia.Source = new Uri(filePath);
+                        ProjectionMedia.Position = TimeSpan.Zero;
+                        ProjectionMedia.Visibility = Visibility.Visible;
+                        ProjectionImageA.Visibility = Visibility.Collapsed;
+                        ProjectionImageB.Visibility = Visibility.Collapsed;
+                        ProjectionMedia.Play();
+                        _isPlayingVideo = true;
+                    }
+                    catch
+                    {
+                        _isPlayingVideo = false;
+                    }
+                }), DispatcherPriority.Normal);
+            }
+            catch { }
+        }
+
+        public void PlayVideo(Uri source)
+        {
+            if (source == null) return;
+            PlayVideo(source.OriginalString);
         }
 
         public void PauseVideo()
         {
-            if (mediaElement != null)
+            Dispatcher.BeginInvoke((Action)(() =>
             {
-                mediaElement.Pause();
-                _isPlayingVideo = false;
-                BtnPlayPause.Content = "Play";
-            }
+                try
+                {
+                    ProjectionMedia.Pause();
+                    _isPlayingVideo = false;
+                }
+                catch { }
+            }), DispatcherPriority.Normal);
         }
 
         public void StopVideo()
         {
-            if (mediaElement != null)
-            {
-                mediaElement.Stop();
-                _isPlayingVideo = false;
-                BtnPlayPause.Content = "Play";
-            }
-        }
-
-        public void PlayVideo()
-        {
-            if (mediaElement != null)
-            {
-                mediaElement.Play();
-                _isPlayingVideo = true;
-                BtnPlayPause.Content = "Pause";
-            }
-        }
-
-        private void ResetTransform()
-        {
-            _currentScale = 1.0;
-            ScaleTransform.ScaleX = 1.0;
-            ScaleTransform.ScaleY = 1.0;
-            TranslateTransform.X = 0;
-            TranslateTransform.Y = 0;
-        }
-
-        // Eventos de zoom / pan (conectados en XAML al Grid LayoutRoot)
-        private void LayoutRoot_MouseWheel(object sender, MouseWheelEventArgs e)
-        {
-            double oldScale = _currentScale;
-            if (e.Delta > 0)
-                _currentScale = Math.Min(MaxScale, _currentScale + ScaleStep);
-            else
-                _currentScale = Math.Max(MinScale, _currentScale - ScaleStep);
-
-            double scaleFactor = _currentScale / oldScale;
-
-            var target = (IInputElement)imageDisplay ?? (IInputElement)LayoutRoot;
-            var pos = e.GetPosition(target);
-
-            // Ajustar translate para mantener el punto bajo el cursor
-            TranslateTransform.X = (1 - scaleFactor) * (pos.X) + scaleFactor * TranslateTransform.X;
-            TranslateTransform.Y = (1 - scaleFactor) * (pos.Y) + scaleFactor * TranslateTransform.Y;
-
-            ScaleTransform.ScaleX = _currentScale;
-            ScaleTransform.ScaleY = _currentScale;
-            e.Handled = true;
-        }
-
-        private void LayoutRoot_MouseDown(object sender, MouseButtonEventArgs e)
-        {
-            if (e.ChangedButton == MouseButton.Left)
-            {
-                _isPanning = true;
-                _lastMousePosition = e.GetPosition(this);
-                try { Mouse.Capture(LayoutRoot); } catch { }
-            }
-        }
-
-        private void LayoutRoot_MouseMove(object sender, MouseEventArgs e)
-        {
-            if (_isPanning && e.LeftButton == MouseButtonState.Pressed)
-            {
-                var pos = e.GetPosition(this);
-                var dx = pos.X - _lastMousePosition.X;
-                var dy = pos.Y - _lastMousePosition.Y;
-
-                TranslateTransform.X += dx;
-                TranslateTransform.Y += dy;
-
-                _lastMousePosition = pos;
-            }
-        }
-
-        private void LayoutRoot_MouseUp(object sender, MouseButtonEventArgs e)
-        {
-            if (e.ChangedButton == MouseButton.Left)
-            {
-                _isPanning = false;
-                try { Mouse.Capture(null); } catch { }
-            }
-        }
-
-        private void Window_Loaded(object sender, RoutedEventArgs e)
-        {
-            // Asegurar transform por si fue creado antes
-            if (imageDisplay != null)
-            {
-                var tg = new TransformGroup();
-                tg.Children.Add(ScaleTransform);
-                tg.Children.Add(TranslateTransform);
-                imageDisplay.RenderTransform = tg;
-            }
-        }
-
-        // Handlers UI
-        private void BtnPlayPause_Click(object sender, RoutedEventArgs e)
-        {
-            if (_isPlayingVideo) PauseVideo(); else PlayVideo();
-        }
-
-        private void BtnStop_Click(object sender, RoutedEventArgs e)
-        {
-            StopVideo();
-        }
-
-        private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            try
-            {
-                if (mediaElement != null) mediaElement.Volume = (VolumeSlider?.Value ?? 75) / 100.0;
-            }
-            catch { }
-        }
-
-        // Añadir método público para que MainWindow pueda actualizar transformaciones de la imagen proyectada
-        public void UpdateImageTransform(double scale, double offsetX, double offsetY)
-        {
-            // Ejecutar en dispatcher por seguridad de hilos y para evitar excepciones UI
-            Application.Current.Dispatcher.Invoke(() =>
+            Dispatcher.BeginInvoke((Action)(() =>
             {
                 try
                 {
-                    ScaleTransform.ScaleX = scale;
-                    ScaleTransform.ScaleY = scale;
-                    TranslateTransform.X = offsetX;
-                    TranslateTransform.Y = offsetY;
+                    ProjectionMedia.Stop();
+                    ProjectionMedia.Source = null;
+                    ProjectionMedia.Visibility = Visibility.Collapsed;
+                    _isPlayingVideo = false;
+                    // Restaurar imágenes visibles para evitar pantalla en negro
+                    ProjectionImageA.Visibility = Visibility.Visible;
+                    ProjectionImageB.Visibility = Visibility.Visible;
                 }
                 catch { }
-            });
+            }), DispatcherPriority.Normal);
+        }
+
+        public void SetVolume(double level)
+        {
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                try
+                {
+                    var v = Math.Max(0.0, Math.Min(1.0, level));
+                    ProjectionMedia.Volume = v;
+                }
+                catch { }
+            }), DispatcherPriority.Normal);
+        }
+
+        public bool IsPlayingVideo()
+        {
+            return _isPlayingVideo;
         }
     }
 }

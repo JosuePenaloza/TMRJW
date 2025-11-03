@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 
@@ -17,8 +16,8 @@ namespace TMRJW
                 var settings = SettingsHelper.Load();
                 var selectedDevice = settings.SelectedMonitorDeviceName;
 
-                var monitors = GetMonitorsNative();
-                MonitorInfo? target = null;
+                var monitors = PlatformInterop.GetMonitorsNative();
+                PlatformInterop.MonitorInfo? target = null;
 
                 // Si hay selección guardada, intentar usarla
                 if (!string.IsNullOrEmpty(selectedDevice))
@@ -99,65 +98,6 @@ namespace TMRJW
                 }
                 catch { }
             }
-        }
-
-        // ----- Native monitor enumeration (similar a AjustesWindow) -----
-        private class MonitorInfo { public string DeviceName = ""; public int X; public int Y; public int Width; public int Height; public bool IsPrimary; }
-
-        private List<MonitorInfo> GetMonitorsNative()
-        {
-            var list = new List<MonitorInfo>();
-
-            MonitorEnumProc callback = (IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr lParam) =>
-            {
-                var mi = new MONITORINFOEX();
-                mi.cbSize = Marshal.SizeOf(typeof(MONITORINFOEX));
-                if (GetMonitorInfo(hMonitor, ref mi))
-                {
-                    int left = mi.rcMonitor.left;
-                    int top = mi.rcMonitor.top;
-                    int right = mi.rcMonitor.right;
-                    int bottom = mi.rcMonitor.bottom;
-                    int w = right - left;
-                    int h = bottom - top;
-                    bool primary = (mi.dwFlags & 1) != 0;
-                    list.Add(new MonitorInfo
-                    {
-                        DeviceName = mi.szDevice.Trim('\0'),
-                        X = left,
-                        Y = top,
-                        Width = w,
-                        Height = h,
-                        IsPrimary = primary
-                    });
-                }
-                return true;
-            };
-
-            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
-            return list;
-        }
-
-        private delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RECT { public int left, top, right, bottom; }
-
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        private struct MONITORINFOEX
-        {
-            public int cbSize;
-            public RECT rcMonitor;
-            public RECT rcWork;
-            public uint dwFlags;
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-            public string szDevice;
         }
     }
 }

@@ -30,7 +30,7 @@ namespace TMRJW
             {
                 CboMonitorSalida.Items.Clear();
 
-                var screens = GetMonitorsNative();
+                var screens = PlatformInterop.GetMonitorsNative();
                 for (int i = 0; i < screens.Count; i++)
                 {
                     var s = screens[i];
@@ -119,95 +119,5 @@ namespace TMRJW
                 MessageBox.Show($"Error al guardar ajustes: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-
-        // ----- Native monitor enumeration -----
-        private class MonitorInfoSimple { public string DeviceName = ""; public int Width; public int Height; public bool IsPrimary; }
-
-        private List<MonitorInfoSimple> GetMonitorsNative()
-        {
-            var list = new List<MonitorInfoSimple>();
-
-            MonitorEnumProc callback = (IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr lParam) =>
-            {
-                var mi = new MONITORINFOEX();
-                mi.cbSize = Marshal.SizeOf(typeof(MONITORINFOEX));
-                if (GetMonitorInfo(hMonitor, ref mi))
-                {
-                    int w = mi.rcMonitor.right - mi.rcMonitor.left;
-                    int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
-                    bool primary = (mi.dwFlags & 1) != 0;
-                    list.Add(new MonitorInfoSimple { DeviceName = mi.szDevice.Trim('\0'), Width = w, Height = h, IsPrimary = primary });
-                }
-                return true;
-            };
-
-            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
-            return list;
-        }
-
-        private delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RECT { public int left, top, right, bottom; }
-
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        private struct MONITORINFOEX
-        {
-            public int cbSize;
-            public RECT rcMonitor;
-            public RECT rcWork;
-            public uint dwFlags;
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-            public string szDevice;
-        }
-    }
-
-    // Helper sencillo para persistir ajustes en JSON dentro de %LocalAppData%\TMRJW\settings.json
-    internal static class SettingsHelper
-    {
-        internal record AppSettings
-        {
-            public string? SelectedMonitorDeviceName { get; set; }
-            public string? ImagenTextoAnio { get; set; }
-        }
-
-        private static string GetPath()
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var dir = Path.Combine(local, "TMRJW");
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "settings.json");
-        }
-
-        public static (string? SelectedMonitorDeviceName, string? ImagenTextoAnio) Load()
-        {
-            try
-            {
-                var p = GetPath();
-                if (!File.Exists(p)) return (null, null);
-                var json = File.ReadAllText(p);
-                var s = JsonSerializer.Deserialize<AppSettings>(json);
-                return (s?.SelectedMonitorDeviceName, s?.ImagenTextoAnio);
-            }
-            catch { return (null, null); }
-        }
-
-        public static void Save((string? SelectedMonitorDeviceName, string? ImagenTextoAnio) tuple)
-        {
-            var s = new AppSettings { SelectedMonitorDeviceName = tuple.SelectedMonitorDeviceName, ImagenTextoAnio = tuple.ImagenTextoAnio };
-            var json = JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(GetPath(), json);
-        }
-
-        // overloads for convenience
-        public static (string? SelectedMonitorDeviceName, string? ImagenTextoAnio) LoadSettings() => Load();
-        public static void Save(string? selectedMonitorDeviceName, string? imagenTextoAnio) => Save((selectedMonitorDeviceName, imagenTextoAnio));
-        internal static void Save(AppSettings s) => Save((s.SelectedMonitorDeviceName, s.ImagenTextoAnio));
     }
 }

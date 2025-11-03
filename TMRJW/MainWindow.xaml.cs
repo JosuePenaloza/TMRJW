@@ -54,9 +54,8 @@ namespace TMRJW
         public MainWindow()
         {
             InitializeComponent();
-            proyeccionWindow = new ProyeccionWindow();
-            // No mostrar inicialmente; posicionarlo en el monitor configurado cuando se active
-            proyeccionWindow?.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
+            // No crear proyeccionWindow aquí para evitar posicionarlo en el monitor primario por defecto.
+            proyeccionWindow = null;
 
             // Registrar cierre
             this.Closing += MainWindow_Closing;
@@ -454,25 +453,22 @@ namespace TMRJW
                 _isProjecting = true;
                 btn.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (ON)");
 
-                if (proyeccionWindow != null)
-                {
-                    proyeccionWindow.ActualizarMonitor(Settings.Default.MonitorSalidaIndex);
-                    proyeccionWindow.Show();
+                // Abrir/posicionar la ventana de proyección en el monitor seleccionado (o externo por defecto)
+                OpenProyeccionOnSelectedMonitor();
 
-                    // Si hay una imagen seleccionada en el panel de imágenes, usarla
-                    var tabControl = FindControl<TabControl>("TabControlImagenes");
-                    if (tabControl != null && tabControl.SelectedItem is TabItem ti &&
-                        ti.Content is Grid grid && grid.Children.OfType<ScrollViewer>().FirstOrDefault() is ScrollViewer sview &&
-                        sview.Content is ListBox lb && lb.SelectedItem is BitmapImage sel)
-                    {
-                        proyeccionWindow.MostrarImagenTexto(sel);
-                    }
-                    else
-                    {
-                        // Si no, si existe imagen de "TextoAnio" en ajustes, mostrarla
-                        var img = LoadBitmapFromFile(Settings.Default.ImagenTextoAnio);
-                        if (img != null) proyeccionWindow.MostrarImagenTexto(img);
-                    }
+                // Si hay una imagen seleccionada en el panel de imágenes, usarla
+                var tabControl = FindControl<TabControl>("TabControlImagenes");
+                if (tabControl != null && tabControl.SelectedItem is TabItem ti &&
+                    ti.Content is Grid grid && grid.Children.OfType<ScrollViewer>().FirstOrDefault() is ScrollViewer sview &&
+                    sview.Content is ListBox lb && lb.SelectedItem is BitmapImage sel)
+                {
+                    proyeccionWindow?.MostrarImagenTexto(sel);
+                }
+                else
+                {
+                    // Si no, si existe imagen de "TextoAnio" en ajustes, mostrarla
+                    var img = LoadBitmapFromFile(Settings.Default.ImagenTextoAnio);
+                    if (img != null) proyeccionWindow?.MostrarImagenTexto(img);
                 }
             }
             else
@@ -480,7 +476,11 @@ namespace TMRJW
                 // Desactivar proyección
                 _isProjecting = false;
                 btn.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (OFF)");
-                proyeccionWindow?.Hide();
+                try
+                {
+                    proyeccionWindow?.Hide();
+                }
+                catch { }
             }
         }
 

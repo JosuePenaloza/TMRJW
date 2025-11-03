@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,7 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Navigation;
 using System.Windows.Media.Imaging;
-using System.Windows.Input; // añadido para MouseButtonEventArgs
+using System.Windows.Input;
 using System.Net.Http;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -20,7 +21,6 @@ namespace TMRJW
     {
         private readonly BrowserWindow _parent;
         public ScriptBridge(BrowserWindow parent) => _parent = parent;
-        // Método invocado desde JS: recibe la URL de la imagen
         public void ImageClicked(string url) => _parent.OnImageUrlClicked(url);
     }
 
@@ -40,19 +40,25 @@ namespace TMRJW
         private bool _isPanningPreview = false;
         private Point _lastPreviewMousePos;
 
+        // Gestión de pestañas y colecciones
+        private readonly Dictionary<string, ObservableCollection<object>> _tabCollections = new();
+        private const string DefaultTabKey = "Todas";
+
         public BrowserWindow()
         {
             InitializeComponent();
             UrlBox.Text = "https://wol.jw.org/es/wol/meetings/r4/lp-s/";
 
             // Registrar handlers: selección actualiza solo previsualización; doble click/Enter proyectan.
-            ImagesListBox.SelectionChanged += ImagesListBox_SelectionChanged;
-            ImagesListBox.MouseDoubleClick += ImagesListBox_MouseDoubleClick;
-            ImagesListBox.KeyDown += ImagesListBox_KeyDown;
+            // (Nota: las ListBox de cada pestaña se crean dinámicamente)
+            // ImagesListBox es una propiedad de conveniencia (no asignarla).
 
-            // Recalcular tamaño de miniaturas al cargar / redimensionar
-            ImagesListBox.Loaded += (s, e) => UpdateWrapPanelItemSize();
-            ImagesListBox.SizeChanged += (s, e) => UpdateWrapPanelItemSize();
+            // Recalcular tamaño de miniaturas al cargar / redimensionar (si usas UpdateWrapPanelItemSize)
+            this.Loaded += (s, e) => {
+                // crear pestaña por defecto
+                EnsureTabExists(DefaultTabKey, "Todas");
+                SelectTab(DefaultTabKey);
+            };
 
             // Registrar eventos para interacción con PreviewImage (zoom/pan con Espacio)
             this.PreviewKeyDown += Window_PreviewKeyDown;
@@ -67,10 +73,7 @@ namespace TMRJW
                 PreviewImage.MouseMove += PreviewImage_MouseMove;
                 PreviewImage.MouseUp += PreviewImage_MouseUp;
             }
-            catch
-            {
-                // ignorar si algún control no existe en tiempo de diseño
-            }
+            catch { }
 
             // silenciar errores de script en el WebBrowser
             WebBrowserControl.Navigated += WebBrowserControl_Navigated;
@@ -80,171 +83,101 @@ namespace TMRJW
             {
                 WebBrowserControl.ObjectForScripting = new ScriptBridge(this);
             }
-            catch
-            {
-                // ignorar si no es posible
-            }
-        }
-
-        public void SetImageSelectedCallback(Action<BitmapImage> callback)
-        {
-            _onImageSelected = callback;
-        }
-
-        private void BtnGo_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var url = UrlBox.Text.Trim();
-                if (!string.IsNullOrEmpty(url))
-                    WebBrowserControl.Navigate(url);
-            }
             catch { }
         }
 
-        private async void WebBrowserControl_LoadCompleted(object sender, NavigationEventArgs e)
+        // Nota: ImagesListBox no se usa ahora directamente; el ListBox se crea dentro de cada TabItem.
+
+        // --- Gestión de pestañas / colecciones ---
+        public void EnsureTabExists(string key, string header)
         {
-            await RefreshImagesFromCurrentPageAsync();
-            InjectClickScript(); // inyectar handlers para clicks dentro de la página
+            if (string.IsNullOrWhiteSpace(key)) key = Guid.NewGuid().ToString();
+            if (_tabCollections.ContainsKey(key)) return;
+
+            var col = new ObservableCollection<object>();
+            _tabCollections[key] = col;
+
+            // crear UI (TabItem + ListBox) en el dispatcher
+            Dispatcher.Invoke(() =>
+            {
+                var tab = new TabItem { Header = header ?? key, Tag = key };
+
+                var lb = new ListBox
+                {
+                    ItemsSource = col,
+                    ItemTemplate = (DataTemplate)FindResource("ThumbnailTemplate"),
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Top,
+                    SelectionMode = SelectionMode.Single
+                };
+
+                // ItemsPanel = WrapPanel Horizontal
+                var factory = new FrameworkElementFactory(typeof(WrapPanel));
+                factory.SetValue(WrapPanel.OrientationProperty, Orientation.Horizontal);
+                lb.ItemsPanel = new ItemsPanelTemplate(factory);
+
+                // handlers que antes usábamos en ImagesListBox: selección y doble click debe actualizar preview / proyectar
+                lb.SelectionChanged += ImagesListBox_SelectionChanged;
+                lb.MouseDoubleClick += ImagesListBox_MouseDoubleClick;
+                lb.KeyDown += ImagesListBox_KeyDown;
+
+                tab.Content = new Border { Background = System.Windows.Media.Brushes.Transparent, Child = lb };
+                InventoryTabs.Items.Add(tab);
+            });
         }
 
-        // NOTE: handler BtnRefreshImages_Click está implementado en BrowserWindow.Events.cs
-        // para evitar definición duplicada lo eliminé de este archivo.
-
-        private async Task RefreshImagesFromCurrentPageAsync()
+        public void AddImageToTab(string key, object item, string header = null)
         {
-            _cts?.Cancel();
-            _cts = new CancellationTokenSource();
+            if (item == null) return;
+            EnsureTabExists(DefaultTabKey, "Todas");
+            EnsureTabExists(key, header ?? key);
 
-            try
-            {
-                string? url = WebBrowserControl.Source?.AbsoluteUri ?? UrlBox.Text;
-                if (string.IsNullOrWhiteSpace(url)) return;
-
-                UrlBox.Text = url;
-
-                var uris = await OnlineLibraryHelper.ExtractImageUrisFromPageAsync(url, _cts.Token).ConfigureAwait(false);
-                if (!uris.Any())
-                {
-                    await Dispatcher.InvokeAsync(() => ImagesListBox.ItemsSource = null);
-                    return;
-                }
-
-                var list = uris.Take(20).ToList();
-                var images = await OnlineLibraryHelper.DownloadImagesAsync(list, _cts.Token).ConfigureAwait(false);
-
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    ImagesListBox.ItemsSource = images;
-                });
-            }
-            catch
-            {
-                // ignorar
-            }
-        }
-
-        // SELECTION CHANGED: actualizar solo la previsualización (NO proyectar)
-        private void ImagesListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                var selected = ImagesListBox.SelectedItem;
-                if (selected is BitmapImage bi)
-                {
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-                    PreviewImage.Visibility = Visibility.Visible;
-                    PreviewImage.Source = bi;
-                    TxtPreviewInfo.Text = "Vista previa: imagen seleccionada (single click)";
-
-                    // Reset transforms de preview para evitar sorpresas al seleccionar nueva imagen
-                    try { BtnResetZoom_Click(null, null); } catch { }
-                }
-                else if (selected is CachedImage ci)
-                {
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-                    PreviewImage.Visibility = Visibility.Visible;
-                    PreviewImage.Source = ci.Image;
-                    TxtPreviewInfo.Text = $"Vista previa: {Path.GetFileName(ci.FilePath)}";
-
-                    try { BtnResetZoom_Click(null, null); } catch { }
-                }
-                else if (selected is string s && File.Exists(s))
-                {
-                    // posible vídeo (ruta como texto)
-                    PreviewImage.Visibility = Visibility.Collapsed;
-                    PreviewMedia.Visibility = Visibility.Visible;
-                    try { PreviewMedia.Source = new Uri(s); } catch { PreviewMedia.Source = null; }
-                    TxtPreviewInfo.Text = $"Vista previa: vídeo {Path.GetFileName(s)}";
-                }
-                else
-                {
-                    // limpiar previsualización
-                    PreviewMedia.Stop();
-                    PreviewMedia.Source = null;
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-                    PreviewImage.Source = null;
-                    PreviewImage.Visibility = Visibility.Visible;
-                    TxtPreviewInfo.Text = "Imagen / Video";
-                }
-            }
-            catch
-            {
-                // ignorar
-            }
-        }
-
-        // KeyDown en la lista: Enter proyecta (igual que doble click)
-        private void ImagesListBox_KeyDown(object? sender, KeyEventArgs e)
-        {
-            if (e.Key == Key.Enter)
-            {
-                TryProjectSelectedItem();
-                e.Handled = true;
-            }
-        }
-
-        // Doble click en inventario → proyectar (comportamiento requerido)
-        private void ImagesListBox_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
-        {
-            TryProjectSelectedItem();
-        }
-
-        // Helper que centraliza la lógica de proyectar el ítem seleccionado (invoca _onImageSelected solo aquí)
-        private void TryProjectSelectedItem()
-        {
-            var selected = ImagesListBox.SelectedItem;
-            if (selected == null) return;
-
-            BitmapImage? toProject = null;
-            if (selected is BitmapImage bi) toProject = bi;
-            else if (selected is CachedImage ci) toProject = ci.Image;
-            else if (selected is string s && File.Exists(s))
-            {
-                // si fuera ruta de imagen, intentar cargarla
-                try
-                {
-                    var bmp = LoadBitmapFromFileCached(s);
-                    if (bmp != null) toProject = bmp;
-                }
-                catch { }
-            }
-
-            if (toProject != null)
+            // añadir a "Todas" y a la pestaña específica
+            Dispatcher.Invoke(() =>
             {
                 try
                 {
-                    // Asegurar invocación en el dispatcher (y que la acción sea la única responsable de proyectar)
-                    Dispatcher.Invoke(() => { try { _onImageSelected?.Invoke(toProject); } catch { } });
+                    _tabCollections[DefaultTabKey].Add(item);
+                    if (key != DefaultTabKey)
+                        _tabCollections[key].Add(item);
                 }
                 catch { }
-            }
+            });
         }
 
-        // Mantener doble click por compatibilidad (ya existía) - vaciar si estaba definido anteriormente
-        private void ImagesListBox_MouseLeftButtonUp(object? sender, MouseButtonEventArgs e)
+        public void AddImagesToTab(string key, IEnumerable<object> items, string header = null)
         {
-            // Intencionalmente vacío: la proyección se realiza solo en doble click o Enter.
+            if (items == null) return;
+            EnsureTabExists(key, header ?? key);
+            EnsureTabExists(DefaultTabKey, "Todas");
+
+            Dispatcher.Invoke(() =>
+            {
+                foreach (var it in items)
+                {
+                    try
+                    {
+                        _tabCollections[DefaultTabKey].Add(it);
+                        if (key != DefaultTabKey) _tabCollections[key].Add(it);
+                    }
+                    catch { }
+                }
+            });
+        }
+
+        public void SelectTab(string key)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                foreach (var ti in InventoryTabs.Items.OfType<TabItem>())
+                {
+                    if (ti.Tag?.ToString() == key || ti.Header?.ToString() == key)
+                    {
+                        InventoryTabs.SelectedItem = ti;
+                        return;
+                    }
+                }
+            });
         }
 
         // ---------------------------
@@ -294,8 +227,6 @@ namespace TMRJW
                 s.ScaleY = newScale;
 
                 // Propagar la transformación a la proyección (si hay ventana de proyección abierta)
-                // SyncProjectionTransform está implementado en BrowserWindow.Events.cs (única copia)
-                // Aquí sólo llamamos al método existente.
                 try { SyncProjectionTransform(newScale, t.X, t.Y); } catch { }
 
                 e.Handled = true;
@@ -410,11 +341,9 @@ namespace TMRJW
                     {
                         try
                         {
-                            // Añadir al inventario (append) COMO CachedImage para consistencia
-                            ImagesListBox.Items.Add(new CachedImage { FilePath = "", Image = bmp });
-
-                            // Actualizar layout responsivo tras añadir item
-                            try { UpdateWrapPanelItemSize(); } catch { }
+                            string pageKey = WebBrowserControl.Source != null ? $"Web: {WebBrowserControl.Source.Host}" : "Web: Desconocida";
+                            EnsureTabExists(pageKey, pageKey);
+                            AddImageToTab(pageKey, new CachedImage { FilePath = "", Image = bmp });
                         }
                         catch { }
                     });
@@ -434,7 +363,7 @@ namespace TMRJW
             }
         }
 
-        private async Task<BitmapImage?> DownloadBitmapFromUrlAsync(Uri uri)
+        private static async Task<BitmapImage?> DownloadBitmapFromUrlAsync(Uri uri)
         {
             try
             {
@@ -463,6 +392,43 @@ namespace TMRJW
             catch
             {
                 return null;
+            }
+        }
+
+        // Nuevo: refrescar imágenes desde la página actual y añadir a pestaña "Web: host"
+        public async Task RefreshImagesFromCurrentPageAsync()
+        {
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+
+            try
+            {
+                string? url = WebBrowserControl.Source?.AbsoluteUri ?? UrlBox.Text;
+                if (string.IsNullOrWhiteSpace(url)) return;
+
+                UrlBox.Text = url;
+
+                var uris = await OnlineLibraryHelper.ExtractImageUrisFromPageAsync(url, _cts.Token).ConfigureAwait(false);
+                if (!uris.Any()) return;
+
+                var list = uris.Take(20).ToList();
+                var images = await OnlineLibraryHelper.DownloadImagesAsync(list, _cts.Token).ConfigureAwait(false);
+
+                var pageUri = new Uri(url);
+                string tabKey = $"Web: {pageUri.Host}";
+                EnsureTabExists(tabKey, tabKey);
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    foreach (var bi in images)
+                    {
+                        AddImageToTab(tabKey, new CachedImage { FilePath = "", Image = bi });
+                    }
+                });
+            }
+            catch
+            {
+                // ignorar
             }
         }
 

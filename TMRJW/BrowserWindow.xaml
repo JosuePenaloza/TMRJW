@@ -5,47 +5,49 @@
         xmlns:local="clr-namespace:TMRJW"
         Title="Navegador" Height="680" Width="1100" MinWidth="900" MinHeight="520">
     <Window.Resources>
-        <!-- Plantilla para CachedImage: imagen con botón eliminar en esquina -->
-        <DataTemplate DataType="{x:Type local:CachedImage}">
+        <!-- Plantilla única para miniaturas (soporta CachedImage y BitmapImage) -->
+        <DataTemplate x:Key="ThumbnailTemplate">
             <Border Margin="6" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1"
                     Padding="6" MinWidth="120" MinHeight="150"
                     Width="{Binding RelativeSource={RelativeSource AncestorType=WrapPanel}, Path=ItemWidth}">
                 <Grid>
-                    <!-- Imagen -->
-                    <Image Source="{Binding Image}" Stretch="UniformToFill" Height="110" VerticalAlignment="Top"/>
+                    <Image Stretch="UniformToFill" Height="110" VerticalAlignment="Top">
+                        <Image.Source>
+                            <PriorityBinding>
+                                <Binding Path="Image" />
+                                <Binding /> <!-- si el item es BitmapImage -->
+                            </PriorityBinding>
+                        </Image.Source>
+                    </Image>
 
-                    <!-- Botón eliminar como overlay en esquina superior derecha -->
-                    <Button Content="🗑"
-                            Width="28" Height="28"
+                    <!-- Botón eliminar (aparece solo en hover sobre la miniatura) -->
+                    <Button Width="30" Height="30"
+                            Content="🗑"
                             ToolTip="Eliminar imagen"
                             Click="BtnDeleteImage_Click"
                             DataContext="{Binding}"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top"
-                            Margin="2"
-                            Background="#CCFFFFFF"
-                            Panel.ZIndex="2" />
-                </Grid>
-            </Border>
-        </DataTemplate>
-
-        <!-- Plantilla para BitmapImage: misma apariencia -->
-        <DataTemplate DataType="{x:Type BitmapImage}">
-            <Border Margin="6" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1"
-                    Padding="6" MinWidth="120" MinHeight="150"
-                    Width="{Binding RelativeSource={RelativeSource AncestorType=WrapPanel}, Path=ItemWidth}">
-                <Grid>
-                    <Image Source="{Binding}" Stretch="UniformToFill" Height="110" VerticalAlignment="Top"/>
-                    <Button Content="🗑"
-                            Width="28" Height="28"
-                            ToolTip="Eliminar imagen"
-                            Click="BtnDeleteImage_Click"
-                            DataContext="{Binding}"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Top"
-                            Margin="2"
-                            Background="#CCFFFFFF"
-                            Panel.ZIndex="2" />
+                            Margin="0,6,10,0"
+                            Panel.ZIndex="2">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Opacity" Value="0" />
+                                <Setter Property="Background" Value="#E53935" />
+                                <Setter Property="Foreground" Value="White" />
+                                <Setter Property="BorderBrush" Value="#B71C1C" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
+                                        <Setter Property="Opacity" Value="1" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Border>
         </DataTemplate>
@@ -64,13 +66,12 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Barra superior -->
             <DockPanel Grid.Row="0" Margin="4" LastChildFill="True">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,8,0">
                     <Button x:Name="BtnBack" Width="28" Height="24" Background="#FFD900" ToolTip="Atrás"
-                            Click="BtnBack_Click" Margin="0,0,6,0" FontSize="14">◀</Button>
+                            Click="BtnBack_Click" Margin="0,0,6,0" FontSize="14" Content="◀"/>
                     <Button x:Name="BtnForward" Width="28" Height="24" Background="#FFD900" ToolTip="Adelante"
-                            Click="BtnForward_Click" FontSize="14">▶</Button>
+                            Click="BtnForward_Click" FontSize="14" Content="▶"/>
                 </StackPanel>
 
                 <TextBox x:Name="UrlBox" Margin="0" Height="28" FontSize="13"
@@ -79,7 +80,7 @@
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="6,0,0,0">
                     <Button x:Name="BtnGo" Content="Ir" Width="44" Height="24" Margin="0,0,6,0" Click="BtnGo_Click"/>
                     <Button x:Name="BtnRefresh" Content="Actualizar" Background="#FF4D4D" Foreground="White" Width="80" Height="28" Click="BtnRefreshImages_Click" Margin="0,0,6,0"/>
-                    <Button x:Name="BtnCaptureFromPage" Content="Capturar" Background="#E53935" Foreground="White" Width="80" Height="28" Click="BtnCaptureFromPage_Click" RenderTransformOrigin="2.512,0.573"/>
+                    <Button x:Name="BtnCaptureFromPage" Content="Capturar" Background="#E53935" Foreground="White" Width="80" Height="28" Click="BtnCaptureFromPage_Click"/>
                 </StackPanel>
             </DockPanel>
 
@@ -98,12 +99,11 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Controles superiores (sin cambios) -->
             <Grid Grid.Row="0" Margin="0,4,0,6">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>  <!-- botones pequeños (izquierda) -->
-                    <ColumnDefinition Width="*" />    <!-- espacio flexible -->
-                    <ColumnDefinition Width="Auto"/>  <!-- botón verde (derecha) -->
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" >
@@ -115,42 +115,12 @@
                             Click="BtnLoadExtra_Click" Margin="0,0,6,0" ToolTip="Cargar imágenes / vídeos"/>
                 </StackPanel>
 
-                <!-- botón verde alineado al extremo derecho -->
                 <Button Grid.Column="2" x:Name="BtnTextoDelAnio" Content="Texto del Año" Background="#2E7D32" Foreground="White"
                         Height="32" MinWidth="140" Click="BtnTextoDelAnio_Click" ToolTip="Proyectar Texto del Año" HorizontalAlignment="Right"/>
             </Grid>
 
-            <TabControl Grid.Row="1" Height="36" Margin="0,0,0,6" Background="#FFE6F0" BorderBrush="#FFD6E8">
-                <TabItem Header="Todas" />
-            </TabControl>
-
-            <Border Grid.Row="2" Background="#F3F3F3" BorderBrush="#CCC" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Text="INVENTARIO DE IMÁGENES" FontWeight="Bold" Margin="0,0,0,8" Grid.Row="0"/>
-
-                    <!-- ListBox con WrapPanel horizontal (items por fila), scroll vertical -->
-                    <ListBox x:Name="ImagesListBox"
-                             Grid.Row="1"
-                             HorizontalContentAlignment="Stretch"
-                             VerticalContentAlignment="Top"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.CanContentScroll="False"
-                             SelectionMode="Single">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <!-- Orientation="Horizontal": items fluyen L->R y al no caber hacen wrap a la siguiente fila -->
-                                <WrapPanel IsItemsHost="True" Orientation="Horizontal"/>
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                    </ListBox>
-                </Grid>
-            </Border>
+            <!-- Pestañas del inventario: aquí se crean dinámicamente desde code-behind -->
+            <TabControl x:Name="InventoryTabs" Grid.Row="1" Grid.RowSpan="2" Margin="0,0,0,6" />
 
             <!-- Preview y controles (sin cambios) -->
             <Border Grid.Row="3" Background="#E8F7FF" BorderBrush="#BEE6FF" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,8,0,6">

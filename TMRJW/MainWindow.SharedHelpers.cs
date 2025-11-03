@@ -100,7 +100,7 @@ namespace TMRJW
             }
         }
 
-        // Mostrar imagen en preview y (opcional) en proyección, detener vídeo
+        // Reemplaza el método existente DisplayImageAndStopVideo por este
         private void DisplayImageAndStopVideo(BitmapImage img, bool showInProjection = false)
         {
             if (img == null) return;
@@ -126,12 +126,26 @@ namespace TMRJW
             {
                 try
                 {
-                    OpenProyeccionOnSelectedMonitor();
-                    proyeccionWindow?.MostrarImagenTexto(img);
+                    // Crear la ventana de proyección solo si no existe
+                    if (proyeccionWindow == null)
+                    {
+                        OpenProyeccionOnSelectedMonitor();
+                    }
+
                     if (proyeccionWindow != null)
                     {
-                        if (proyeccionWindow.WindowState == WindowState.Minimized) proyeccionWindow.WindowState = WindowState.Normal;
-                        proyeccionWindow.Show();
+                        // Evitar ocultar/recerrar la ventana: asegurar visible y restaurada
+                        try { if (proyeccionWindow.WindowState == WindowState.Minimized) proyeccionWindow.WindowState = WindowState.Normal; } catch { }
+                        try { if (!proyeccionWindow.IsVisible) proyeccionWindow.Show(); } catch { }
+                        try { proyeccionWindow.Topmost = true; } catch { }
+                        try { proyeccionWindow.Activate(); } catch { }
+
+                        // Forzar render antes de cambiar Source para reducir posibilidad de flash al escritorio
+                        try { Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render); } catch { }
+
+                        // Mostrar imagen sin recrear la ventana
+                        try { proyeccionWindow.MostrarImagenTexto(img); } catch { }
+
                         _isProjecting = true;
                         FindControl<Button>("BtnProyectarHDMI")?.SetCurrentValue(ContentProperty, "PROYECTAR ON/OFF (ON)");
                     }

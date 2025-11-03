@@ -58,8 +58,25 @@ namespace TMRJW
                 if (proyeccionWindow == null) OpenProyeccionOnSelectedMonitor();
                 if (proyeccionWindow == null) return;
 
-                if (proyeccionWindow.IsPlayingVideo) { proyeccionWindow.PauseVideo(); (sender as Button)?.SetCurrentValue(ContentProperty, "⏵"); }
-                else { proyeccionWindow.PlayVideo(); (sender as Button)?.SetCurrentValue(ContentProperty, "⏸"); }
+                // Obtener vídeo seleccionado (si lo hay)
+                var lista = FindControl<ListBox>("ListaVideos");
+                VideoItem? seleccionado = (lista?.SelectedItem as VideoItem);
+
+                // INVOCAR los métodos (no acceder como propiedades)
+                if (proyeccionWindow.IsPlayingVideo())
+                {
+                    proyeccionWindow.PauseVideo();
+                    (sender as Button)?.SetCurrentValue(ContentProperty, "⏵");
+                }
+                else
+                {
+                    // Si hay un vídeo seleccionado, reproducir su ruta
+                    if (seleccionado != null && !string.IsNullOrWhiteSpace(seleccionado.FilePath))
+                    {
+                        proyeccionWindow.PlayVideo(seleccionado.FilePath);
+                    }
+                    (sender as Button)?.SetCurrentValue(ContentProperty, "⏸");
+                }
             }
             catch { }
         }
@@ -271,5 +288,11 @@ namespace TMRJW
             }
             catch { }
         }
+
+        // NOTE: La implementación de UpdateWrapPanelItemSize se ha eliminado de este archivo
+        // porque ya existe en `MainWindow.SharedHelpers.cs`. Mantener una única definición evita
+        // el error CS0111 (miembro duplicado). Llame simplemente a `UpdateWrapPanelItemSize(listBox)`
+        // desde aquí y el compilador resolverá la única implementación.
+
     }
 }

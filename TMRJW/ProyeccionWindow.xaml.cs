@@ -16,6 +16,14 @@ namespace TMRJW
         private readonly TimeSpan _fadeDuration = TimeSpan.FromMilliseconds(180);
 
         private bool _isPlayingVideo = false;
+        private string? _currentVideoPath = null;
+
+        // Timer para actualizar progreso de reproducción
+        private DispatcherTimer? _playbackTimer;
+
+        // Eventos públicos para que MainWindow pueda escuchar progreso/fin
+        public event Action<TimeSpan, TimeSpan?>? PlaybackProgress;
+        public event Action? PlaybackEnded;
 
         public ProyeccionWindow()
         {
@@ -32,6 +40,54 @@ namespace TMRJW
 
                 RenderOptions.SetBitmapScalingMode(ProjectionImageA, BitmapScalingMode.HighQuality);
                 RenderOptions.SetBitmapScalingMode(ProjectionImageB, BitmapScalingMode.HighQuality);
+            }
+            catch { }
+
+            // Configurar timer (cada250ms)
+            _playbackTimer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+            _playbackTimer.Tick += (s, e) =>
+            {
+                try
+                {
+                    if (ProjectionMedia != null && ProjectionMedia.NaturalDuration.HasTimeSpan)
+                    {
+                        var pos = ProjectionMedia.Position;
+                        var dur = ProjectionMedia.NaturalDuration.HasTimeSpan ? ProjectionMedia.NaturalDuration.TimeSpan : (TimeSpan?)null;
+                        PlaybackProgress?.Invoke(pos, dur);
+                    }
+                    else if (ProjectionMedia != null)
+                    {
+                        var pos = ProjectionMedia.Position;
+                        PlaybackProgress?.Invoke(pos, null);
+                    }
+                }
+                catch { }
+            };
+
+            // Manejar evento fin de media
+            try
+            {
+                ProjectionMedia.MediaEnded += (s, e) =>
+                {
+                    try
+                    {
+                        _isPlayingVideo = false;
+                        _playbackTimer?.Stop();
+                        PlaybackEnded?.Invoke();
+                        // parar y ocultar media, restaurar imágenes
+                        ProjectionMedia.Stop();
+                        ProjectionMedia.Visibility = Visibility.Collapsed;
+                        ProjectionImageA.Visibility = Visibility.Visible;
+                        ProjectionImageB.Visibility = Visibility.Visible;
+
+                        // clear current path so subsequent PlayVideo will open anew
+                        _currentVideoPath = null;
+                    }
+                    catch { }
+                };
             }
             catch { }
         }
@@ -227,76 +283,116 @@ namespace TMRJW
                 {
                     try
                     {
-                        ProjectionMedia.Source = new Uri(filePath);
-                        ProjectionMedia.Position = TimeSpan.Zero;
-                        ProjectionMedia.Visibility = Visibility.Visible;
-                        ProjectionImageA.Visibility = Visibility.Collapsed;
-                        ProjectionImageB.Visibility = Visibility.Collapsed;
-                        ProjectionMedia.Play();
-                        _isPlayingVideo = true;
-                    }
-                    catch
+                        // If same video is loaded and currently paused, resume instead of reloading
+                        if (!string.IsNullOrWhiteSpace(_currentVideoPath) && string.Equals(_currentVideoPath, filePath, StringComparison.OrdinalIgnoreCase)
+ && ProjectionMedia.Source != null && !_isPlayingVideo)
+ {
+ ProjectionMedia.Play();
+ _isPlayingVideo = true;
+ try { _playbackTimer?.Start(); } catch { }
+ return;
+ }
+
+ // Otherwise load new source
+ ProjectionMedia.Source = new Uri(filePath);
+ ProjectionMedia.Position = TimeSpan.Zero;
+ ProjectionMedia.Visibility = Visibility.Visible;
+ ProjectionImageA.Visibility = Visibility.Collapsed;
+ ProjectionImageB.Visibility = Visibility.Collapsed;
+ ProjectionMedia.Play();
+ _isPlayingVideo = true;
+ _currentVideoPath = filePath;
+
+ try { _playbackTimer?.Start(); } catch { }
+ }
+ catch
+ {
+ _isPlayingVideo = false;
+ }
+ }), DispatcherPriority.Normal);
+ }
+ catch { }
+ }
+
+ public void PlayVideo(Uri source)
+ {
+ if (source == null) return;
+ PlayVideo(source.OriginalString);
+ }
+
+ public void PauseVideo()
+ {
+ Dispatcher.BeginInvoke((Action)(() =>
+ {
+ try
+ {
+ ProjectionMedia.Pause();
+ _isPlayingVideo = false;
+ try { _playbackTimer?.Stop(); } catch { }
+ }
+ catch { }
+ }), DispatcherPriority.Normal);
+ }
+
+ public void StopVideo()
+ {
+ Dispatcher.BeginInvoke((Action)(() =>
+ {
+ try
+ {
+ ProjectionMedia.Stop();
+ ProjectionMedia.Source = null;
+ ProjectionMedia.Visibility = Visibility.Collapsed;
+ _isPlayingVideo = false;
+ try { _playbackTimer?.Stop(); } catch { }
+ // Restaurar imágenes visibles para evitar pantalla en negro
+ ProjectionImageA.Visibility = Visibility.Visible;
+ ProjectionImageB.Visibility = Visibility.Visible;
+
+ _currentVideoPath = null;
+ }
+ catch { }
+ }), DispatcherPriority.Normal);
+ }
+
+ public void SetVolume(double level)
+ {
+ Dispatcher.BeginInvoke((Action)(() =>
+ {
+ try
+ {
+ var v = Math.Max(0.0, Math.Min(1.0, level));
+ ProjectionMedia.Volume = v;
+ }
+ catch { }
+ }), DispatcherPriority.Normal);
+ }
+
+ public bool IsPlayingVideo()
+ {
+ return _isPlayingVideo;
+ }
+
+        // Permite buscar a una fracción (0..1) del video
+        public void SeekToFraction(double fraction)
+        {
+            try
+            {
+                if (ProjectionMedia == null) return;
+                if (!ProjectionMedia.NaturalDuration.HasTimeSpan) return;
+                var dur = ProjectionMedia.NaturalDuration.TimeSpan;
+                if (dur.TotalSeconds <=0) return;
+                var pos = TimeSpan.FromSeconds(Math.Max(0.0, Math.Min(1.0, fraction)) * dur.TotalSeconds);
+                Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    try
                     {
-                        _isPlayingVideo = false;
+                        ProjectionMedia.Position = pos;
                     }
+                    catch { }
                 }), DispatcherPriority.Normal);
             }
             catch { }
-        }
-
-        public void PlayVideo(Uri source)
-        {
-            if (source == null) return;
-            PlayVideo(source.OriginalString);
-        }
-
-        public void PauseVideo()
-        {
-            Dispatcher.BeginInvoke((Action)(() =>
-            {
-                try
-                {
-                    ProjectionMedia.Pause();
-                    _isPlayingVideo = false;
-                }
-                catch { }
-            }), DispatcherPriority.Normal);
-        }
-
-        public void StopVideo()
-        {
-            Dispatcher.BeginInvoke((Action)(() =>
-            {
-                try
-                {
-                    ProjectionMedia.Stop();
-                    ProjectionMedia.Source = null;
-                    ProjectionMedia.Visibility = Visibility.Collapsed;
-                    _isPlayingVideo = false;
-                    // Restaurar imágenes visibles para evitar pantalla en negro
-                    ProjectionImageA.Visibility = Visibility.Visible;
-                    ProjectionImageB.Visibility = Visibility.Visible;
-                }
-                catch { }
-            }), DispatcherPriority.Normal);
-        }
-
-        public void SetVolume(double level)
-        {
-            Dispatcher.BeginInvoke((Action)(() =>
-            {
-                try
-                {
-                    var v = Math.Max(0.0, Math.Min(1.0, level));
-                    ProjectionMedia.Volume = v;
-                }
-                catch { }
-            }), DispatcherPriority.Normal);
-        }
-
-        public bool IsPlayingVideo()
-        {
-            return _isPlayingVideo;
         }
     }
 }

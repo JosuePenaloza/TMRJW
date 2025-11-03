@@ -269,14 +269,56 @@ namespace TMRJW
             if (e.ChangedButton == MouseButton.Left) { _isPanningMonitor = false; try { Mouse.Capture(null); } catch { } }
         }
 
-        private void SldTimeline_PreviewMouseDown(object sender, MouseButtonEventArgs e) => _isTimelineDragging = true;
-        private void SldTimeline_PreviewMouseUp(object sender, MouseButtonEventArgs e) => _isTimelineDragging = false;
+        private void SldTimeline_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            _isTimelineDragging = true;
+        }
+
+        private void SldTimeline_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            _isTimelineDragging = false;
+            try
+            {
+                var sld = FindControl<Slider>("SldTimeline");
+                if (sld != null)
+                {
+                    proyeccionWindow?.SeekToFraction(sld.Value);
+                }
+            }
+            catch { }
+        }
 
         private void SldTimeline_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
+            // Si el usuario está arrastrando, actualizar el texto de tiempo localmente
             if (!_isTimelineDragging) return;
-            var txt = FindControl<TextBlock>("TxtCurrentTime");
-            if (txt != null) txt.SetCurrentValue(TextBlock.TextProperty, $"{Math.Round(Math.Clamp(e.NewValue, 0.0, 1.0) * 100.0)}%");
+            try
+            {
+                var sld = sender as Slider ?? FindControl<Slider>("SldTimeline");
+                var txtCur = FindControl<TextBlock>("TxtCurrentTime");
+                var txtTot = FindControl<TextBlock>("TxtTotalTime");
+
+                if (sld == null) return;
+
+                // Intentar derivar duración desde la proyección si está disponible
+                TimeSpan? dur = null;
+                try { dur = proyeccionWindow?.ProjectionMedia?.NaturalDuration.HasTimeSpan == true ? proyeccionWindow.ProjectionMedia.NaturalDuration.TimeSpan : (TimeSpan?)null; } catch { }
+
+                double frac = Math.Max(0.0, Math.Min(1.0, sld.Value));
+                string fmt(TimeSpan t) => t.ToString(@"hh\:mm\:ss");
+
+                if (dur.HasValue && dur.Value.TotalSeconds >0)
+                {
+                    var pos = TimeSpan.FromSeconds(frac * dur.Value.TotalSeconds);
+                    if (txtCur != null) txtCur.SetCurrentValue(TextBlock.TextProperty, fmt(pos));
+                    if (txtTot != null) txtTot.SetCurrentValue(TextBlock.TextProperty, $" / {fmt(dur.Value)}");
+                }
+                else
+                {
+                    if (txtCur != null) txtCur.SetCurrentValue(TextBlock.TextProperty, "00:00:00");
+                }
+            }
+            catch { }
         }
 
         private void SldVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)

@@ -114,37 +114,83 @@ namespace TMRJW
                 Application.Current.Dispatcher.Invoke(() =>
                 {
                     var mp = new MediaPlayer();
-                    mp.MediaOpened += (s, e) => mre.Set();
-                    mp.Open(new Uri(path));
-                    if (!mre.WaitOne(2000)) { mp.Close(); return; }
-                    mp.Position = TimeSpan.FromMilliseconds(300);
-                    mp.Play();
-                    System.Threading.Thread.Sleep(150);
+                    TimeSpan? chosenPosition = null;
 
-                    var dv = new DrawingVisual();
-                    using (var dc = dv.RenderOpen())
+                    // Establecer handler para MediaOpened
+                    mp.MediaOpened += (s, e) =>
                     {
-                        var vb = new VideoDrawing { Rect = new Rect(0, 0, width, height), Player = mp };
-                        dc.DrawDrawing(vb);
+                        try
+                        {
+                            // Calcular posición representativa:50% del total (frame central) o300ms mínimo
+                            if (mp.NaturalDuration.HasTimeSpan)
+                            {
+                                var dur = mp.NaturalDuration.TimeSpan.TotalMilliseconds;
+                                if (dur > 0)
+                                {
+                                    double posMs = dur * 0.5; // frame del centro
+                                    // Clamp para estar dentro de rango
+                                    posMs = Math.Max(200, Math.Min(dur - 100, posMs));
+                                    chosenPosition = TimeSpan.FromMilliseconds(posMs);
+                                }
+                            }
+                            else
+                            {
+                                chosenPosition = TimeSpan.FromMilliseconds(300);
+                            }
+                        }
+                        catch { chosenPosition = TimeSpan.FromMilliseconds(300); }
+
+                        // Notify waiter
+                        mre.Set();
+                    };
+
+                    try
+                    {
+                        mp.Open(new Uri(path));
+                        // Esperar a MediaOpened (o timeout)
+                        if (!mre.WaitOne(4000)) { mp.Close(); return; }
+
+                        // Si no se asignó posición, fallback
+                        if (!chosenPosition.HasValue) chosenPosition = TimeSpan.FromMilliseconds(300);
+
+                        // Asegurarse de que la posición sea válida
+                        try { mp.Position = chosenPosition.Value; } catch { }
+
+                        // Silenciar y reproducir brevemente para que el frame esté listo
+                        try { mp.Volume = 0.0; } catch { }
+                        try { mp.Play(); } catch { }
+
+                        System.Threading.Thread.Sleep(400);
+
+                        var dv = new DrawingVisual();
+                        using (var dc = dv.RenderOpen())
+                        {
+                            var vb = new VideoDrawing { Rect = new Rect(0, 0, width, height), Player = mp };
+                            dc.DrawDrawing(vb);
+                        }
+
+                        var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+                        rtb.Render(dv);
+                        mp.Close();
+
+                        var encoder = new PngBitmapEncoder();
+                        encoder.Frames.Add(BitmapFrame.Create(rtb));
+                        using (var ms = new MemoryStream())
+                        {
+                            encoder.Save(ms);
+                            ms.Position = 0;
+                            var bi = new BitmapImage();
+                            bi.BeginInit();
+                            bi.CacheOption = BitmapCacheOption.OnLoad;
+                            bi.StreamSource = ms;
+                            bi.EndInit();
+                            bi.Freeze();
+                            result = bi;
+                        }
                     }
-
-                    var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-                    rtb.Render(dv);
-                    mp.Close();
-
-                    var encoder = new PngBitmapEncoder();
-                    encoder.Frames.Add(BitmapFrame.Create(rtb));
-                    using (var ms = new MemoryStream())
+                    catch
                     {
-                        encoder.Save(ms);
-                        ms.Position = 0;
-                        var bi = new BitmapImage();
-                        bi.BeginInit();
-                        bi.CacheOption = BitmapCacheOption.OnLoad;
-                        bi.StreamSource = ms;
-                        bi.EndInit();
-                        bi.Freeze();
-                        result = bi;
+                        try { mp.Close(); } catch { }
                     }
                 });
 

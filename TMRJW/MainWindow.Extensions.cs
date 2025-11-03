@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Controls;
 
 namespace TMRJW
 {
@@ -41,6 +42,7 @@ namespace TMRJW
                         WindowStartupLocation = WindowStartupLocation.CenterOwner
                     };
                     proyeccionWindow = fallback;
+                    AttachProjectionEvents(proyeccionWindow);
                     proyeccionWindow.Show();
                     return;
                 }
@@ -82,6 +84,7 @@ namespace TMRJW
                 catch { }
 
                 proyeccionWindow = pw;
+                AttachProjectionEvents(proyeccionWindow);
                 proyeccionWindow.Show();
             }
             catch (Exception ex)
@@ -93,11 +96,89 @@ namespace TMRJW
                     if (proyeccionWindow == null)
                     {
                         proyeccionWindow = new ProyeccionWindow();
+                        AttachProjectionEvents(proyeccionWindow);
                         proyeccionWindow.Show();
                     }
                 }
                 catch { }
             }
+        }
+
+        // Suscribe eventos de progreso y fin de reproducción para actualizar la UI de MainWindow
+        private void AttachProjectionEvents(ProyeccionWindow pw)
+        {
+            if (pw == null) return;
+
+            // Evitar suscripciones dobles
+            try { pw.PlaybackProgress -= Proyeccion_PlaybackProgress; } catch { }
+            try { pw.PlaybackEnded -= Proyeccion_PlaybackEnded; } catch { }
+
+            pw.PlaybackProgress += Proyeccion_PlaybackProgress;
+            pw.PlaybackEnded += Proyeccion_PlaybackEnded;
+        }
+
+        private void Proyeccion_PlaybackProgress(TimeSpan position, TimeSpan? duration)
+        {
+            // Actualizar slider y textos en el hilo de UI
+            Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    var sld = FindControl<Slider>("SldTimeline");
+                    var txtCur = FindControl<TextBlock>("TxtCurrentTime");
+                    var txtTot = FindControl<TextBlock>("TxtTotalTime");
+
+                    string fmt(TimeSpan t) => t.ToString(@"hh\:mm\:ss");
+
+                    if (duration.HasValue && duration.Value.TotalSeconds > 0)
+                    {
+                        if (sld != null)
+                        {
+                            double val = Math.Max(0.0, Math.Min(1.0, position.TotalSeconds / duration.Value.TotalSeconds));
+                            sld.Value = val;
+                        }
+                        if (txtCur != null) txtCur.SetCurrentValue(TextBlock.TextProperty, fmt(position));
+                        if (txtTot != null) txtTot.SetCurrentValue(TextBlock.TextProperty, $" / {fmt(duration.Value)}");
+                    }
+                    else
+                    {
+                        if (sld != null) sld.Value = 0;
+                        if (txtCur != null) txtCur.SetCurrentValue(TextBlock.TextProperty, fmt(position));
+                        if (txtTot != null) txtTot.SetCurrentValue(TextBlock.TextProperty, " /00:00:00");
+                    }
+                }
+                catch { }
+            });
+        }
+
+        private void Proyeccion_PlaybackEnded()
+        {
+            // Mostrar automáticamente imagen del 'Texto del Año' cuando termine el video
+            Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    var settings = SettingsHelper.Load();
+                    var ruta = settings.ImagenTextoAnio;
+                    if (!string.IsNullOrWhiteSpace(ruta) && System.IO.File.Exists(ruta))
+                    {
+                        var img = PlatformInterop.LoadBitmapFromFile(ruta);
+                        if (img != null)
+                        {
+                            try
+                            {
+                                // Mostrar en proyección (si está abierta)
+                                if (proyeccionWindow != null)
+                                {
+                                    proyeccionWindow.MostrarImagenTexto(img);
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+            });
         }
     }
 }

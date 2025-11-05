@@ -1,7 +1,7 @@
 ﻿<Window x:Class="TMRJW.AjustesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Ajustes y Configuración" Height="420" Width="480"
+        Title="Ajustes y Configuración" Height="520" Width="520"
         WindowStartupLocation="CenterScreen"
         Background="#2D2D30"
         Loaded="AjustesWindow_Loaded">
@@ -53,6 +53,17 @@
 
                 <TextBlock Text="Monitor de Salida" Foreground="LightGray" Margin="0,0,0,5"/>
                 <ComboBox x:Name="CboMonitorSalida" Margin="0,0,0,15"/>
+
+                <!-- Ruta a FFmpeg -->
+                <TextBlock Text="Ruta a FFmpeg (carpeta bin de x64)" Foreground="LightGray" Margin="0,0,0,5"/>
+                <Grid Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="TxtFfmpegPath" Grid.Column="0" Background="#444444" Foreground="White" IsReadOnly="True" Margin="0,0,5,0" Text="{Binding FfmpegPath, Mode=OneWay}" />
+                    <Button x:Name="BtnSeleccionarFfmpeg" Grid.Column="1" Content="Buscar..." Width="80" Click="BtnSeleccionarFfmpeg_Click" />
+                </Grid>
 
                 <TextBlock Text="Administración de Semanas" Foreground="LightGray" Margin="0,0,0,5"/>
                 <Button x:Name="BtnBorrarSemanaActual" 

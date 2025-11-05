@@ -1,4 +1,4 @@
-using System;
+Ôªøusing System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -15,24 +15,33 @@ namespace TMRJW
         private static readonly HttpClient _http = new HttpClient();
 
         /// <summary>
-        /// Construye la URL semanal para wol.jw.org en la secciÛn de ReuniÛn de la semana.
+        /// Construye la URL semanal para wol.jw.org en la secci√≥n de Reuni√≥n de la semana.
         /// Ej: GetWeeklyUrl(2025, 44) -> https://wol.jw.org/es/wol/meetings/r4/lp-s/2025/44
         /// </summary>
         public static string GetWeeklyUrl(int year, int week) => $"https://wol.jw.org/es/wol/meetings/r4/lp-s/{year}/{week}";
 
         /// <summary>
-        /// Extrae URIs de im·genes (jpg/png/gif/webp) encontradas en el HTML de la p·gina.
+        /// Extrae URIs de im√°genes (jpg/png/gif/webp) encontradas en el HTML de la p√°gina.
         /// Usa un parseo sencillo mediante regex buscando recursos en el dominio wol.jw.org.
         /// </summary>
         public static async Task<List<Uri>> ExtractImageUrisFromPageAsync(string pageUrl, CancellationToken ct = default)
         {
-            if (string.IsNullOrWhiteSpace(pageUrl)) return new List<Uri>();
+            return await ExtractMediaUrisFromPageAsync(pageUrl, new[] { "png", "jpg", "jpeg", "gif", "webp" }, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Extrae URIs de recursos cuya extensi√≥n est√© en la lista "extensions".
+        /// </summary>
+        public static async Task<List<Uri>> ExtractMediaUrisFromPageAsync(string pageUrl, string[] extensions, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(pageUrl) || extensions == null || extensions.Length == 0) return new List<Uri>();
             try
             {
                 string html = await _http.GetStringAsync(pageUrl, ct).ConfigureAwait(false);
-                var matches = Regex.Matches(html,
-                    @"https?:\/\/(?:\w+\.)?wol\.jw\.org\/[^\s'""<>]+?\.(?:png|jpe?g|gif|webp)",
-                    RegexOptions.IgnoreCase);
+                // construir una alternativa en regex como (?:png|jpg|mp4)
+                var alt = string.Join("|", extensions.Select(e => Regex.Escape(e)));
+                var pattern = $"https?:\\/\\/(?:\\w+\\.)?wol\\.jw\\.org\\/[^\\s'\"<>]+?\\.(?:{alt})";
+                var matches = Regex.Matches(html, pattern, RegexOptions.IgnoreCase);
                 var uris = matches.Cast<System.Text.RegularExpressions.Match>()
                     .Select(m => Uri.TryCreate(m.Value, UriKind.Absolute, out var u) ? u : null)
                     .Where(u => u != null)
@@ -48,7 +57,7 @@ namespace TMRJW
         }
 
         /// <summary>
-        /// Descarga im·genes (stream) y crea BitmapImage congeladas listas para UI thread.
+        /// Descarga im√°genes (stream) y crea BitmapImage congeladas listas para UI thread.
         /// </summary>
         public static async Task<List<BitmapImage>> DownloadImagesAsync(IEnumerable<Uri> uris, CancellationToken ct = default)
         {

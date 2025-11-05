@@ -20,6 +20,10 @@ namespace TMRJW
                 // mostrar ruta guardada si existe
                 if (!string.IsNullOrEmpty(settings.ImagenTextoAnio))
                     TxtImagenTextoAnioRuta.Text = settings.ImagenTextoAnio;
+
+                // mostrar ruta FFmpeg si existe
+                if (!string.IsNullOrEmpty(settings.FfmpegPath))
+                    try { TxtFfmpegPath.Text = settings.FfmpegPath; } catch { }
             }
             catch { }
         }
@@ -90,33 +94,6 @@ namespace TMRJW
             catch (Exception ex)
             {
                 MessageBox.Show($"Error al borrar la caché: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        // Nuevo nombre del handler para evitar duplicado con el otro partial
-        private void BtnGuardarAjustes_SaveClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var settings = SettingsHelper.Load();
-
-                // monitor seleccionado (tag)
-                if (CboMonitorSalida.SelectedItem is ComboBoxItem sel && sel.Tag is string devName)
-                    settings.SelectedMonitorDeviceName = devName;
-                else
-                    settings.SelectedMonitorDeviceName = null;
-
-                // imagen de Texto del Año
-                settings.ImagenTextoAnio = TxtImagenTextoAnioRuta.Text;
-
-                SettingsHelper.Save(settings);
-
-                MessageBox.Show("Ajustes guardados.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
-                this.Close();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error al guardar ajustes: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
     }

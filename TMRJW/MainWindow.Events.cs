@@ -26,7 +26,44 @@ namespace TMRJW
             try
             {
                 var bw = new BrowserWindow { Owner = this };
+                // Imagen: mostrar en preview/proyección como antes
                 bw.SetImageSelectedCallback(img => Dispatcher.Invoke(() => DisplayImageAndStopVideo(img, true)));
+
+                // Vídeo: cuando BrowserWindow notifique una ruta/URL de vídeo, detener primero la reproducción en el preview
+                // para evitar conflicto en el acceso al fichero y luego abrir la proyección y reproducir.
+                bw.SetVideoSelectedCallback(path => Dispatcher.Invoke(async () =>
+                {
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(path)) return;
+
+                        // Pedir al BrowserWindow que libere su MediaElement
+                        try { bw.StopPreviewPlaybackAndReset(); } catch { }
+
+                        // Copiar a temporal antes de reproducir en proyección para evitar locks
+                        string? tempPath = null;
+                        try { tempPath = await bw.CopyMediaToTempAsync(path, forProjection: true).ConfigureAwait(false); } catch { }
+
+                        // Asegurar ventana de proyección
+                        if (proyeccionWindow == null) OpenProyeccionOnSelectedMonitor();
+                        if (proyeccionWindow == null) return;
+
+                        if (!string.IsNullOrWhiteSpace(tempPath))
+                        {
+                            proyeccionWindow.PlayVideo(tempPath);
+                        }
+                        else
+                        {
+                            // fallback a usar la ruta original
+                            if (Uri.TryCreate(path, UriKind.Absolute, out Uri? u) && (u.Scheme == "http" || u.Scheme == "https"))
+                                proyeccionWindow.PlayVideo(u);
+                            else
+                                proyeccionWindow.PlayVideo(path);
+                        }
+                    }
+                    catch { }
+                }));
+
                 bw.Show();
             }
             catch { }
@@ -336,5 +373,49 @@ namespace TMRJW
         // el error CS0111 (miembro duplicado). Llame simplemente a `UpdateWrapPanelItemSize(listBox)`
         // desde aquí y el compilador resolverá la única implementación.
 
+        // Wrappers para ser invocadas desde BrowserWindow para controlar la proyección
+        public void PlayProjectionFromPath(string path)
+        {
+            try
+            {
+                if (proyeccionWindow == null) OpenProyeccionOnSelectedMonitor();
+                if (proyeccionWindow == null) return;
+
+                // Intentar reproducir directamente; BrowserWindow ya puede haber copiado a temp para proyección
+                proyeccionWindow.PlayVideo(path);
+            }
+            catch { }
+        }
+
+        public void PauseProjection()
+        {
+            try { proyeccionWindow?.PauseVideo(); } catch { }
+        }
+
+        public void StopProjection()
+        {
+            try { proyeccionWindow?.StopVideo(); } catch { }
+        }
+
+        public bool ProyeccionWindowIsPlaying()
+        {
+            try { return proyeccionWindow?.IsPlayingVideo() ?? false; } catch { return false; }
+        }
+
+        public void SeekProjectionToFraction(double fraction)
+        {
+            try { proyeccionWindow?.SeekToFraction(fraction); } catch { }
+        }
+
+        public TimeSpan? GetProjectionDuration()
+        {
+            try
+            {
+                if (proyeccionWindow == null) return null;
+                var dur = proyeccionWindow.ProjectionMedia?.NaturalDuration.HasTimeSpan == true ? proyeccionWindow.ProjectionMedia.NaturalDuration.TimeSpan : (TimeSpan?)null;
+                return dur;
+            }
+            catch { return null; }
+        }
     }
 }

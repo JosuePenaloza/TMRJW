@@ -3,11 +3,15 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Controls;
+using System.Runtime.InteropServices;
 
 namespace TMRJW
 {
     public partial class MainWindow : Window
     {
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
         // Llama a este método cuando quieras abrir la proyección en el monitor seleccionado.
         // Asegúrate de invocarlo desde el handler que actualmente abre la proyección.
         public void OpenProyeccionOnSelectedMonitor()
@@ -47,25 +51,13 @@ namespace TMRJW
                     return;
                 }
 
-                // Obtener escala DPI de la ventana actual (WPF DIP = pixels / dpiScale)
-                var dpiScale = VisualTreeHelper.GetDpi(this);
-                double dpiScaleX = dpiScale.DpiScaleX;
-                double dpiScaleY = dpiScale.DpiScaleY;
-
-                // Convertir coordenadas de monitor (píxeles) a unidades WPF (DIP)
-                double wpfLeft = target.X / dpiScaleX;
-                double wpfTop = target.Y / dpiScaleY;
-                double wpfWidth = target.Width / dpiScaleX;
-                double wpfHeight = target.Height / dpiScaleY;
-
-                // Crear la ventana de proyección y asignarla al campo proyeccionWindow
+                // Crear la ventana de proyección (posicionaremos exactamente en píxeles nativos del monitor)
                 var pw = new ProyeccionWindow
                 {
                     WindowStartupLocation = WindowStartupLocation.Manual,
-                    Left = wpfLeft,
-                    Top = wpfTop,
-                    Width = wpfWidth,
-                    Height = wpfHeight,
+                    // establecer tamaño/posición por SetWindowPos en píxeles nativos luego de Show()
+                    Width = target.Width,
+                    Height = target.Height,
                     WindowStyle = WindowStyle.None,
                     ResizeMode = ResizeMode.NoResize,
                     Topmost = true,
@@ -86,6 +78,21 @@ namespace TMRJW
                 proyeccionWindow = pw;
                 AttachProjectionEvents(proyeccionWindow);
                 proyeccionWindow.Show();
+
+                // Posicionar la ventana exactamente en las coordenadas de monitor (en píxeles nativos)
+                try
+                {
+                    var helper = new System.Windows.Interop.WindowInteropHelper(proyeccionWindow);
+                    IntPtr hWnd = helper.Handle;
+                    if (hWnd != IntPtr.Zero)
+                    {
+                        // P/Invoke SetWindowPos
+                        const uint SWP_SHOWWINDOW = 0x0040;
+                        IntPtr HWND_TOPMOST = new IntPtr(-1);
+                        SetWindowPos(hWnd, HWND_TOPMOST, target.X, target.Y, target.Width, target.Height, SWP_SHOWWINDOW);
+                      }
+                }
+                catch { }
             }
             catch (Exception ex)
             {
@@ -149,6 +156,19 @@ namespace TMRJW
                 }
                 catch { }
             });
+
+            // Notificar a todas las BrowserWindow abiertas para que actualicen su preview
+            try
+            {
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is BrowserWindow bw)
+                    {
+                        try { bw.UpdatePreviewPlayback(position, duration); } catch { }
+                    }
+                }
+            }
+            catch { }
         }
 
         private void Proyeccion_PlaybackEnded()

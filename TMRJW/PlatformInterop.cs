@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Diagnostics;
 
 namespace TMRJW
 {
@@ -103,9 +104,11 @@ namespace TMRJW
             catch { return null; }
         }
 
-        // Generar thumbnail de frame de video (usa MediaPlayer en dispatcher)
+        // Generar thumbnail de frame de video (usa MediaPlayer en dispatcher).
+        // Si falla, intenta extraer el frame usando ffmpeg embebido en la carpeta "ffmpeg/bin/x64" o en la ruta especificada en settings.
         public static BitmapImage? GenerateVideoFrameThumbnail(string path, int width, int height)
         {
+            // Intentar método nativo con MediaPlayer primero
             try
             {
                 BitmapImage? result = null;
@@ -121,14 +124,12 @@ namespace TMRJW
                     {
                         try
                         {
-                            // Calcular posición representativa:50% del total (frame central) o300ms mínimo
                             if (mp.NaturalDuration.HasTimeSpan)
                             {
                                 var dur = mp.NaturalDuration.TimeSpan.TotalMilliseconds;
                                 if (dur > 0)
                                 {
                                     double posMs = dur * 0.5; // frame del centro
-                                    // Clamp para estar dentro de rango
                                     posMs = Math.Max(200, Math.Min(dur - 100, posMs));
                                     chosenPosition = TimeSpan.FromMilliseconds(posMs);
                                 }
@@ -140,23 +141,18 @@ namespace TMRJW
                         }
                         catch { chosenPosition = TimeSpan.FromMilliseconds(300); }
 
-                        // Notify waiter
                         mre.Set();
                     };
 
                     try
                     {
                         mp.Open(new Uri(path));
-                        // Esperar a MediaOpened (o timeout)
                         if (!mre.WaitOne(4000)) { mp.Close(); return; }
 
-                        // Si no se asignó posición, fallback
                         if (!chosenPosition.HasValue) chosenPosition = TimeSpan.FromMilliseconds(300);
 
-                        // Asegurarse de que la posición sea válida
                         try { mp.Position = chosenPosition.Value; } catch { }
 
-                        // Silenciar y reproducir brevemente para que el frame esté listo
                         try { mp.Volume = 0.0; } catch { }
                         try { mp.Play(); } catch { }
 
@@ -194,9 +190,96 @@ namespace TMRJW
                     }
                 });
 
-                return result;
+                if (result != null)
+                    return result;
             }
-            catch { return null; }
+            catch { /* Ignorar y pasar al fallback */ }
+
+            // Fallback: usar ffmpeg embebido o ruta en settings
+            try
+            {
+                var settings = SettingsHelper.Load();
+                BitmapImage? ff = null;
+
+                // Priorizar ruta configurada por el usuario
+                if (!string.IsNullOrWhiteSpace(settings.FfmpegPath))
+                {
+                    var candidate = Path.Combine(settings.FfmpegPath, "ffmpeg.exe");
+                    if (File.Exists(candidate)) ff = GenerateVideoFrameThumbnailWithFfmpegExecutable(candidate, path, width, height);
+                }
+
+                // Si no hay ruta configurada o falló, intentar carpeta bundlada
+                if (ff == null)
+                {
+                    ff = GenerateVideoFrameThumbnailWithBundledFfmpeg(path, width, height);
+                }
+
+                if (ff != null) return ff;
+            }
+            catch { }
+
+            return null;
+        }
+
+        private static BitmapImage? GenerateVideoFrameThumbnailWithFfmpegExecutable(string ffmpegExe, string path, int width, int height)
+        {
+            if (!File.Exists(path) || !File.Exists(ffmpegExe)) return null;
+            string tempOut = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".png");
+            string[] offsets = new[] { "00:00:01.000", "00:00:00.500", "00:00:02.000" };
+
+            foreach (var offset in offsets)
+            {
+                try
+                {
+                    var args = $"-ss {offset} -i \"{path}\" -frames:v 1 -vf \"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2\" -y \"{tempOut}\"";
+
+                    var psi = new ProcessStartInfo(ffmpegExe, args)
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        RedirectStandardError = true,
+                        RedirectStandardOutput = true
+                    };
+
+                    using (var proc = Process.Start(psi))
+                    {
+                        if (proc == null) continue;
+                        proc.StandardError.ReadToEndAsync();
+                        proc.StandardOutput.ReadToEndAsync();
+                        if (!proc.WaitForExit(5000))
+                        {
+                            try { proc.Kill(); } catch { }
+                            continue;
+                        }
+
+                        if (!File.Exists(tempOut)) continue;
+                        var fi = new FileInfo(tempOut);
+                        if (fi.Length < 200) { try { File.Delete(tempOut); } catch { } continue; }
+
+                        var bi = LoadBitmapFromFile(tempOut);
+                        try { File.Delete(tempOut); } catch { }
+                        if (bi != null) return bi;
+                    }
+                }
+                catch
+                {
+                    try { if (File.Exists(tempOut)) File.Delete(tempOut); } catch { }
+                }
+            }
+
+            return null;
+        }
+
+        // Usa ffmpeg.exe ubicado en <appdir>/ffmpeg/bin/x64/ffmpeg.exe para extraer un frame.
+        private static BitmapImage? GenerateVideoFrameThumbnailWithBundledFfmpeg(string path, int width, int height)
+        {
+            if (!File.Exists(path)) return null;
+
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory ?? Environment.CurrentDirectory;
+            string ffmpegExe = Path.Combine(baseDir, "ffmpeg", "bin", "x64", "ffmpeg.exe");
+            if (!File.Exists(ffmpegExe)) return null;
+
+            return GenerateVideoFrameThumbnailWithFfmpegExecutable(ffmpegExe, path, width, height);
         }
 
         // --- P/Invoke y structs (únicos en el proyecto) ---

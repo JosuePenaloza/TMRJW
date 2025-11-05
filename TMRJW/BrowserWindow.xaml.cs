@@ -44,6 +44,9 @@ namespace TMRJW
         private readonly Dictionary<string, ObservableCollection<object>> _tabCollections = new();
         private const string DefaultTabKey = "Todas";
 
+        // Evitar añadir imágenes web duplicadas (clave: URI absoluta)
+        private readonly HashSet<string> _seenImageUris = new();
+
         public BrowserWindow()
         {
             InitializeComponent();
@@ -105,16 +108,48 @@ namespace TMRJW
                 var lb = new ListBox
                 {
                     ItemsSource = col,
-                    ItemTemplate = (DataTemplate)FindResource("ThumbnailTemplate"),
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     VerticalContentAlignment = VerticalAlignment.Top,
                     SelectionMode = SelectionMode.Single
                 };
 
-                // ItemsPanel = WrapPanel Horizontal
-                var factory = new FrameworkElementFactory(typeof(WrapPanel));
-                factory.SetValue(WrapPanel.OrientationProperty, Orientation.Horizontal);
-                lb.ItemsPanel = new ItemsPanelTemplate(factory);
+                // Seleccionar plantilla según tipo de pestaña
+                try
+                {
+                    if (key != null && key.StartsWith("Videos:", StringComparison.OrdinalIgnoreCase))
+                        lb.ItemTemplate = (DataTemplate)FindResource("VideoItemTemplate");
+                    else if (string.Equals(key, DefaultTabKey, StringComparison.OrdinalIgnoreCase) || (key != null && key.StartsWith("Carpeta:", StringComparison.OrdinalIgnoreCase)))
+                        lb.ItemTemplate = (DataTemplate)FindResource("ListItemTemplate");
+                    else
+                        lb.ItemTemplate = (DataTemplate)FindResource("ThumbnailTemplate");
+                }
+                catch
+                {
+                    lb.ItemTemplate = (DataTemplate)FindResource("ThumbnailTemplate");
+                }
+
+                // Seleccionar ItemsPanel según tipo de pestaña
+                if (key != null && key.StartsWith("Videos:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // lista vertical para vídeos
+                    var spFactory = new FrameworkElementFactory(typeof(StackPanel));
+                    spFactory.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
+                    lb.ItemsPanel = new ItemsPanelTemplate(spFactory);
+                }
+                else if (string.Equals(key, DefaultTabKey, StringComparison.OrdinalIgnoreCase) || (key != null && key.StartsWith("Carpeta:", StringComparison.OrdinalIgnoreCase)))
+                {
+                    // lista vertical para 'Todas' y carpetas de imágenes
+                    var spFactory = new FrameworkElementFactory(typeof(StackPanel));
+                    spFactory.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
+                    lb.ItemsPanel = new ItemsPanelTemplate(spFactory);
+                }
+                else
+                {
+                    // ItemsPanel = WrapPanel Horizontal para otras pestañas (miniaturas)
+                    var factory = new FrameworkElementFactory(typeof(WrapPanel));
+                    factory.SetValue(WrapPanel.OrientationProperty, Orientation.Horizontal);
+                    lb.ItemsPanel = new ItemsPanelTemplate(factory);
+                }
 
                 // handlers que antes usábamos en ImagesListBox: selección y doble click debe actualizar preview / proyectar
                 lb.SelectionChanged += ImagesListBox_SelectionChanged;
@@ -126,26 +161,57 @@ namespace TMRJW
             });
         }
 
-        public void AddImageToTab(string key, object item, string header = null)
+        // Añade item a pestaña. Por defecto también añade a la pestaña 'Todas' (addToAll=true).
+        public void AddImageToTab(string key, object item, string header = null, bool addToAll = true)
         {
             if (item == null) return;
-            EnsureTabExists(DefaultTabKey, "Todas");
             EnsureTabExists(key, header ?? key);
+            EnsureTabExists(DefaultTabKey, "Todas");
 
-            // añadir a "Todas" y a la pestaña específica
             Dispatcher.Invoke(() =>
             {
                 try
                 {
-                    _tabCollections[DefaultTabKey].Add(item);
+                    object toAdd = item;
+
+                    // Si es cadena y corresponde a vídeos, envolver en VideoListItem y lanzar generación de thumbnail
+                    if (item is string s && !string.IsNullOrWhiteSpace(s) && key != null && key.StartsWith("Videos:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var v = new VideoListItem { FilePath = s };
+                        toAdd = v;
+
+                        // generar thumbnail en background y asignar cuando esté listo
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var thumb = await GenerateVideoThumbnailAsync(s, 160, 90).ConfigureAwait(false);
+                                if (thumb != null)
+                                {
+                                    await Dispatcher.InvokeAsync(() =>
+                                    {
+                                        try { v.Thumbnail = thumb; } catch { }
+                                    });
+                                }
+                            }
+                            catch { }
+                        });
+                    }
+
+                    if (addToAll)
+                    {
+                        _tabCollections[DefaultTabKey].Add(toAdd);
+                    }
+
                     if (key != DefaultTabKey)
-                        _tabCollections[key].Add(item);
+                        _tabCollections[key].Add(toAdd);
                 }
                 catch { }
             });
         }
 
-        public void AddImagesToTab(string key, IEnumerable<object> items, string header = null)
+        // Version que añade múltiples items; por defecto añade también a 'Todas'
+        public void AddImagesToTab(string key, IEnumerable<object> items, string header = null, bool addToAll = true)
         {
             if (items == null) return;
             EnsureTabExists(key, header ?? key);
@@ -157,8 +223,10 @@ namespace TMRJW
                 {
                     try
                     {
-                        _tabCollections[DefaultTabKey].Add(it);
-                        if (key != DefaultTabKey) _tabCollections[key].Add(it);
+                        if (addToAll)
+                            _tabCollections[DefaultTabKey].Add(it);
+                        if (key != DefaultTabKey)
+                            _tabCollections[key].Add(it);
                     }
                     catch { }
                 }
@@ -329,6 +397,9 @@ namespace TMRJW
                 }
 
                 _lastClickedImageUri = finalUri;
+                // evitar añadir duplicados
+                try { if (_seenImageUris.Contains(finalUri.AbsoluteUri)) return; } catch { }
+
                 _isDownloadingImage = true;
 
                 var bmp = await DownloadBitmapFromUrlAsync(finalUri).ConfigureAwait(false);
@@ -344,6 +415,7 @@ namespace TMRJW
                             string pageKey = WebBrowserControl.Source != null ? $"Web: {WebBrowserControl.Source.Host}" : "Web: Desconocida";
                             EnsureTabExists(pageKey, pageKey);
                             AddImageToTab(pageKey, new CachedImage { FilePath = "", Image = bmp });
+                            try { _seenImageUris.Add(finalUri.AbsoluteUri); } catch { }
                         }
                         catch { }
                     });
@@ -420,9 +492,20 @@ namespace TMRJW
 
                 await Dispatcher.InvokeAsync(() =>
                 {
+                    int i = 0;
                     foreach (var bi in images)
                     {
-                        AddImageToTab(tabKey, new CachedImage { FilePath = "", Image = bi });
+                        try
+                        {
+                            var srcUri = list.ElementAtOrDefault(i);
+                            AddImageToTab(tabKey, new CachedImage { FilePath = "", Image = bi });
+                            if (srcUri != null)
+                            {
+                                try { _seenImageUris.Add(srcUri.AbsoluteUri); } catch { }
+                            }
+                        }
+                        catch { }
+                        i++;
                     }
                 });
             }
@@ -452,7 +535,7 @@ namespace TMRJW
                                     if(t){
                                         var bg = window.getComputedStyle(t).backgroundImage;
                                         if(bg && bg.indexOf('url(') !== -1){
-                                            var m = /url\\(['""]?(.*?)['""]?\\)/.exec(bg);
+                                            var m = /url\(['""']?(.*?)['""']?\)/.exec(bg);
                                             if(m && m[1]) sendUrl(m[1]);
                                         }
                                     }

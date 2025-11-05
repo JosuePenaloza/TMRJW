@@ -35,32 +35,41 @@ namespace TMRJW
         // Ahora captura/descarga todas las imágenes de la página, guarda en cache y las añade al inventario
         private async void BtnCaptureFromPage_Click(object sender, RoutedEventArgs e)
         {
+            // Mostrar indicador y deshabilitar botón mientras se analiza la página
             try
             {
+                Dispatcher.Invoke(() =>
+                {
+                    try { CaptureIndicator.Visibility = Visibility.Visible; } catch { }
+                    try { BtnCaptureFromPage.IsEnabled = false; } catch { }
+                });
+
                 var url = WebBrowserControl.Source?.AbsoluteUri ?? UrlBox.Text;
                 if (string.IsNullOrWhiteSpace(url)) return;
 
-                // extraer URIs
-                var uris = await OnlineLibraryHelper.ExtractImageUrisFromPageAsync(url, CancellationToken.None);
-                if (!uris.Any())
-                {
-                    MessageBox.Show("No se encontraron imágenes en la página.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
+                var pageUri = new Uri(url);
+                string imagesTabKey = $"Web: {pageUri.Host}";
+                string videosTabKey = $"Videos: {pageUri.Host}";
 
-                // descargar todas (secuencial para evitar sobrecarga; se puede paralelizar con limitador)
+                // Extraer URIs de imágenes y vídeos por separado
+                var imageUris = await OnlineLibraryHelper.ExtractMediaUrisFromPageAsync(url, new[] { "png", "jpg", "jpeg", "gif", "webp" }, CancellationToken.None);
+                var videoUris = await OnlineLibraryHelper.ExtractMediaUrisFromPageAsync(url, new[] { "mp4", "webm", "wmv", "avi" }, CancellationToken.None);
+
+                // Descargar imágenes
                 var imagesList = new List<(Uri Uri, byte[]? Bytes)>();
-                foreach (var u in uris)
+                foreach (var u in imageUris)
                 {
                     try { var bytes = await s_http.GetByteArrayAsync(u).ConfigureAwait(false); imagesList.Add((u, bytes)); }
                     catch { imagesList.Add((u, null)); }
                 }
 
-                var added = 0;
-                var pageUri = new Uri(url);
-                string tabKey = $"Web: {pageUri.Host}";
-                EnsureTabExists(tabKey, tabKey);
+                EnsureTabExists(imagesTabKey, imagesTabKey);
+                EnsureTabExists(videosTabKey, videosTabKey);
 
+                var addedImages = 0;
+                await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+                // Procesar imágenes y añadir a la pestaña de imágenes (y 'Todas')
                 await Dispatcher.InvokeAsync(() =>
                 {
                     foreach (var item in imagesList)
@@ -76,19 +85,48 @@ namespace TMRJW
                                 if (bi != null)
                                 {
                                     var ci = new CachedImage { FilePath = path, Image = bi };
-                                    AddImageToTab(tabKey, ci);
-                                    added++;
+                                    AddImageToTab(imagesTabKey, ci); // por defecto añade también a 'Todas'
+                                    addedImages++;
                                 }
                             }
                         }
                         catch { }
                     }
-                    MessageBox.Show($"Capturadas {added} imágenes y añadidas al inventario.", "Captura completa", MessageBoxButton.OK, MessageBoxImage.Information);
                 });
+
+                // Añadir vídeos como URLs a una pestaña separada "Videos: host" (NO añadir a 'Todas')
+                int addedVideos = 0;
+                await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+                foreach (var vu in videoUris)
+                {
+                    try
+                    {
+                        // Guardar la URL como string; no añadir a 'Todas' (addToAll = false)
+                        AddImageToTab(videosTabKey, vu.AbsoluteUri, videosTabKey, addToAll: false);
+                        addedVideos++;
+                    }
+                    catch { }
+                }
+
+                MessageBox.Show($"Capturadas {addedImages} imágenes y {addedVideos} vídeos desde la página.", "Captura completa", MessageBoxButton.OK, MessageBoxImage.Information);
+                try { UpdateWrapPanelItemSize(); } catch { }
             }
             catch
             {
-                MessageBox.Show("Error al capturar imágenes de la página.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("Error al capturar imágenes o vídeos de la página.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally
+            {
+                // Restaurar UI
+                try
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        try { CaptureIndicator.Visibility = Visibility.Collapsed; } catch { }
+                        try { BtnCaptureFromPage.IsEnabled = true; } catch { }
+                    });
+                }
+                catch { }
             }
         }
 
@@ -178,14 +216,25 @@ namespace TMRJW
         // BtnLoadExtra: ahora agrupa por carpeta y crea pestaña "Carpeta: <nombre>"
         private void BtnLoadExtra_Click(object sender, RoutedEventArgs e)
         {
-            var dlg = new OpenFileDialog { Multiselect = true, Filter = "Imágenes|*.jpg;*.jpeg;*.png;*.bmp;*.gif|Videos|*.mp4;*.wmv;*.avi" };
+            // Mostrar por defecto filtro que incluye imágenes y vídeos para que el usuario vea ambos tipos al abrir la carpeta
+            var dlg = new OpenFileDialog
+            {
+                Multiselect = true,
+                Filter = "Imágenes y Vídeos|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.mp4;*.wmv;*.avi|Imágenes|*.jpg;*.jpeg;*.png;*.bmp;*.gif|Vídeos|*.mp4;*.wmv;*.avi|Todos los archivos|*.*"
+            };
+
             if (dlg.ShowDialog() != true) return;
 
-            string? folder = null;
-            if (dlg.FileNames.Length > 0) folder = Path.GetDirectoryName(dlg.FileNames[0]);
+            // Agrupar todos los archivos cargados desde 'Cargar extra' en pestaanas únicas
+            // para imágenes usaremos 'Imágenes Cargadas' y para vídeos 'Videos: Extras'
+            // Usar clave con prefijo 'Carpeta:' para que EnsureTabExists trate la pestaña como lista vertical
+            string imagesTabKey = "Carpeta: Imágenes Cargadas";
+            string imagesTabHeader = "Imágenes Cargadas";
+            string videosTabKey = "Videos: Extras"; // mantiene prefijo 'Videos:' para plantilla de vídeo
+            string videosTabHeader = "Videos Extras";
 
-            string tabKey = folder != null ? $"Carpeta: {Path.GetFileName(folder)}" : "Carpeta: Varios";
-            EnsureTabExists(tabKey, tabKey);
+            EnsureTabExists(imagesTabKey, imagesTabHeader);
+            EnsureTabExists(videosTabKey, videosTabHeader);
 
             foreach (var f in dlg.FileNames)
             {
@@ -193,24 +242,33 @@ namespace TMRJW
                 {
                     if (!File.Exists(f)) continue;
 
-                    if (f.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) ||
-                        f.EndsWith(".wmv", StringComparison.OrdinalIgnoreCase) ||
-                        f.EndsWith(".avi", StringComparison.OrdinalIgnoreCase))
+                    var ext = Path.GetExtension(f) ?? string.Empty;
+                    if (ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase) ||
+                        ext.Equals(".wmv", StringComparison.OrdinalIgnoreCase) ||
+                        ext.Equals(".avi", StringComparison.OrdinalIgnoreCase) ||
+                        ext.Equals(".webm", StringComparison.OrdinalIgnoreCase))
                     {
-                        // vídeos: añadir como ruta (o adaptar según tu lógica)
-                        AddImageToTab(tabKey, f);
+                        // Vídeos: añadir a la pestaña de Vídeos de esta carpeta. NO añadir a 'Todas' (addToAll=false)
+                        AddImageToTab(videosTabKey, f, videosTabHeader, addToAll: false);
                     }
                     else
                     {
-                        // copiar al cache para uniformidad
-                        var bytes = File.ReadAllBytes(f);
-                        var path = SaveBytesToCacheAsync(bytes, Path.GetExtension(f)).GetAwaiter().GetResult();
-                        var bi = LoadBitmapFromFileCached(path);
-                        if (bi != null)
+                        // Imágenes: copiar al cache para uniformidad
+                        try
                         {
-                            var ci = new CachedImage { FilePath = path, Image = bi };
-                            AddImageToTab(tabKey, ci);
+                            var bytes = File.ReadAllBytes(f);
+                            var path = SaveBytesToCacheAsync(bytes, Path.GetExtension(f)).GetAwaiter().GetResult();
+                            if (!string.IsNullOrEmpty(path))
+                            {
+                                var bi = LoadBitmapFromFileCached(path);
+                                if (bi != null)
+                                {
+                                    var ci = new CachedImage { FilePath = path, Image = bi };
+                                    AddImageToTab(imagesTabKey, ci, imagesTabHeader);
+                                }
+                            }
                         }
+                        catch { }
                     }
                 }
                 catch { }
@@ -248,6 +306,31 @@ namespace TMRJW
         private void BtnReturnToMain_Click(object sender, RoutedEventArgs e)
         {
             try { this.Close(); } catch { }
+        }
+
+        private void BtnOpenAjustes_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var ajustes = new AjustesWindow { Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+                ajustes.ShowDialog();
+                // después de cerrar ajustes, recargar monitores en caso de que se cambiara selección
+                try { PopulateMonitorsAfterSettingsChange(); } catch { }
+            }
+            catch { }
+        }
+
+        private void PopulateMonitorsAfterSettingsChange()
+        {
+            try
+            {
+                // Si el InventoryTabs/otros necesitan refrescar selección de monitor, delegar a MainWindow
+                if (this.Owner is MainWindow mw)
+                {
+                    try { mw.OpenProyeccionOnSelectedMonitor(); } catch { }
+                }
+            }
+            catch { }
         }
 
         // Handler para eliminar imagen del inventario (botón 🗑)
@@ -288,6 +371,17 @@ namespace TMRJW
                 // Si es BitmapImage o string, quitar de las colecciones
                 try
                 {
+                    // Soportar VideoListItem
+                    if (item is VideoListItem vli)
+                    {
+                        foreach (var k in _tabCollections.Keys.ToArray())
+                        {
+                            try { _tabCollections[k].Remove(vli); } catch { }
+                        }
+                        try { UpdateWrapPanelItemSize(); } catch { }
+                        return;
+                    }
+
                     foreach (var k in _tabCollections.Keys.ToArray())
                     {
                         try { _tabCollections[k].Remove(item); } catch { }
@@ -299,30 +393,33 @@ namespace TMRJW
             catch { }
         }
 
-        // Preview: reproducir media en el panel de previsualización
-        private void BtnPreviewPlay_Click(object sender, RoutedEventArgs e)
+        // Play/Pause toggle for preview
+        private void BtnPreviewPlayPause_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (PreviewMedia == null) return;
-
-                // Si hay Source asignado, reproducir; si no, intentar detectar si el item seleccionado es una ruta de vídeo en formato de texto
-                if (PreviewMedia.Source != null)
+                // En la opción solicitada, el preview no reproduce localmente. Los botones deben controlar la proyección.
+                if (this.Owner is MainWindow mw)
                 {
-                    PreviewImage.Visibility = Visibility.Collapsed;
-                    PreviewMedia.Visibility = Visibility.Visible;
-                    PreviewMedia.Play();
+                    try
+                    {
+                        if (mw.ProyeccionWindowIsPlaying())
+                        {
+                            mw.PauseProjection();
+                            BtnPreviewPlayPause.Content = "⏵";
+                        }
+                        else
+                        {
+                            // Si hay un vídeo seleccionado en el BrowserWindow, pedir reproducir en proyección
+                            if (!string.IsNullOrWhiteSpace(_lastSelectedVideoPath))
+                            {
+                                mw.PlayProjectionFromPath(_lastSelectedVideoPath);
+                                BtnPreviewPlayPause.Content = "⏸";
+                            }
+                        }
+                    }
+                    catch { }
                 }
-            }
-            catch { }
-        }
-
-        private void BtnPreviewPause_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (PreviewMedia == null) return;
-                PreviewMedia.Pause();
             }
             catch { }
         }
@@ -331,56 +428,51 @@ namespace TMRJW
         {
             try
             {
-                if (PreviewMedia == null) return;
-                PreviewMedia.Stop();
-                PreviewMedia.Visibility = Visibility.Collapsed;
-                PreviewImage.Visibility = Visibility.Visible;
-            }
-            catch { }
-        }
-
-        // Controles multimedia (panel inferior) que manejan el mismo MediaElement de previsualización
-        private void BtnMediaPlay_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (PreviewMedia == null) return;
-                if (PreviewMedia.Source == null)
+                if (this.Owner is MainWindow mw)
                 {
-                    // intentar tomar Source desde selección en ImagesListBox si es texto (nombre de archivo)
-                    if (ImagesListBox.SelectedItem is string s && File.Exists(s))
-                        PreviewMedia.Source = new Uri(s);
-                }
-
-                if (PreviewMedia.Source != null)
-                {
-                    PreviewImage.Visibility = Visibility.Collapsed;
-                    PreviewMedia.Visibility = Visibility.Visible;
-                    PreviewMedia.Play();
+                    try { mw.StopProjection(); BtnPreviewPlayPause.Content = "⏵"; } catch { }
                 }
             }
             catch { }
         }
 
-        private void BtnMediaPause_Click(object sender, RoutedEventArgs e)
+        private bool _previewIsPlaying = false;
+        private System.Windows.Threading.DispatcherTimer? _previewTimer;
+
+        private void StartPreviewTimer()
         {
             try
             {
-                PreviewMedia?.Pause();
+                if (_previewTimer == null)
+                {
+                    _previewTimer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
+                    {
+                        Interval = TimeSpan.FromMilliseconds(250)
+                    };
+                    _previewTimer.Tick += (s, e) => {
+                        try
+                        {
+                            if (PreviewMedia != null && PreviewMedia.NaturalDuration.HasTimeSpan)
+                            {
+                                var pos = PreviewMedia.Position;
+                                var dur = PreviewMedia.NaturalDuration.TimeSpan;
+                                double frac = dur.TotalSeconds > 0 ? pos.TotalSeconds / dur.TotalSeconds : 0;
+                                PreviewSldTimeline.Value = frac;
+                                TxtPreviewCurrentTime.Text = pos.ToString(@"hh\:mm\:ss");
+                                TxtPreviewTotalTime.Text = "/" + dur.ToString(@"hh\:mm\:ss");
+                            }
+                        }
+                        catch { }
+                    };
+                }
+                _previewTimer?.Start();
             }
             catch { }
         }
 
-        private void BtnMediaStop_Click(object sender, RoutedEventArgs e)
+        private void StopPreviewTimer()
         {
-            try
-            {
-                if (PreviewMedia == null) return;
-                PreviewMedia.Stop();
-                PreviewMedia.Visibility = Visibility.Collapsed;
-                PreviewImage.Visibility = Visibility.Visible;
-            }
-            catch { }
+            try { _previewTimer?.Stop(); } catch { }
         }
 
         // Zoom / Pan básicos sobre PreviewImage (añade RenderTransform si hace falta)
@@ -459,6 +551,22 @@ namespace TMRJW
             try { SyncProjectionTransform(s.ScaleX, t.X, t.Y); } catch { }
         }
 
+        private void PreviewVolumeSld_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            try
+            {
+                double volPerc = (sender as Slider)?.Value ?? 75.0;
+                double level = Math.Max(0.0, Math.Min(100.0, volPerc)) / 100.0;
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw)
+                    {
+                        try { pw.SetVolume(level); } catch { }
+                    }
+                }
+            }
+            catch { }
+        }
         // -------------------------
         // Helpers para layout responsivo (WrapPanel)
         // -------------------------

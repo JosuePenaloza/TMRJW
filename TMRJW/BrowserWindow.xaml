@@ -15,7 +15,8 @@
                         <Image.Source>
                             <PriorityBinding>
                                 <Binding Path="Image" />
-                                <Binding /> <!-- si el item es BitmapImage -->
+                                <Binding Path="Thumbnail" />
+                                <Binding /> <!-- si el item es BitmapImage o string -->
                             </PriorityBinding>
                         </Image.Source>
                     </Image>
@@ -51,6 +52,51 @@
                 </Grid>
             </Border>
         </DataTemplate>
+
+        <!-- Plantilla para listado vertical (lista de 'Todas' o carpetas) -->
+        <DataTemplate x:Key="ListItemTemplate">
+            <Border Margin="6" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1" Padding="6" Height="100">
+                <DockPanel>
+                    <Image Width="160" Height="90" Stretch="UniformToFill" DockPanel.Dock="Left" Margin="0,0,8,0">
+                        <Image.Source>
+                            <PriorityBinding>
+                                <Binding Path="Image" />
+                                <Binding Path="Thumbnail" />
+                                <Binding />
+                            </PriorityBinding>
+                        </Image.Source>
+                    </Image>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Path=FileName, FallbackValue='Imagen'}" FontWeight="Bold" />
+                        <TextBlock Text="{Binding Path=FilePath, FallbackValue=''}" FontSize="11" Foreground="#666" />
+                    </StackPanel>
+                    <Button Content="🗑" Width="30" Height="30" VerticalAlignment="Top" HorizontalAlignment="Right" DockPanel.Dock="Right" Click="BtnDeleteImage_Click" DataContext="{Binding}"/>
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- Plantilla específica para elementos de vídeo en listas verticales -->
+        <DataTemplate x:Key="VideoItemTemplate">
+            <Border Margin="4" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1" Padding="6" Height="100">
+                <DockPanel>
+                    <Image Width="160" Height="90" Stretch="UniformToFill" DockPanel.Dock="Left" Margin="0,0,8,0">
+                        <Image.Source>
+                            <PriorityBinding>
+                                <Binding Path="Thumbnail" />
+                                <Binding Path="Image" />
+                                <Binding />
+                            </PriorityBinding>
+                        </Image.Source>
+                    </Image>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Path=FileName}" FontWeight="Bold" />
+                        <TextBlock Text="{Binding Path=FilePath}" FontSize="11" Foreground="#666" TextTrimming="CharacterEllipsis" Width="200" />
+                    </StackPanel>
+                    <Button Content="🗑" Width="30" Height="30" VerticalAlignment="Top" HorizontalAlignment="Right" DockPanel.Dock="Right" Click="BtnDeleteImage_Click" DataContext="{Binding}"/>
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+
     </Window.Resources>
 
     <Grid Margin="6">
@@ -79,8 +125,12 @@
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="6,0,0,0">
                     <Button x:Name="BtnGo" Content="Ir" Width="44" Height="24" Margin="0,0,6,0" Click="BtnGo_Click"/>
-                    <Button x:Name="BtnRefresh" Content="Actualizar" Background="#FF4D4D" Foreground="White" Width="80" Height="28" Click="BtnRefreshImages_Click" Margin="0,0,6,0"/>
+                    <Button x:Name="BtnRefresh" Content="Actualizar" Background="#FF4D4D" Foreground="White" Width="80" Height="28" Click="BtnRefreshImages_Click" Margin="0,0,6,0" Visibility="Collapsed"/>
                     <Button x:Name="BtnCaptureFromPage" Content="Capturar" Background="#E53935" Foreground="White" Width="80" Height="28" Click="BtnCaptureFromPage_Click"/>
+                    <!-- Botón Ajustes al lado derecho del botón Capturar -->
+                    <Button x:Name="BtnOpenAjustes" Content="⚙" Background="#1976D2" Foreground="White" Width="36" Height="28" Margin="6,0,0,0" Click="BtnOpenAjustes_Click" ToolTip="Ajustes" />
+                    <!-- Indicador pequeño mientras se analizan/descargan imágenes -->
+                    <ProgressBar x:Name="CaptureIndicator" Width="18" Height="18" Margin="6,5,0,0" IsIndeterminate="True" Visibility="Collapsed" />
                 </StackPanel>
             </DockPanel>
 
@@ -135,12 +185,23 @@
                         <MediaElement x:Name="PreviewMedia" LoadedBehavior="Manual" Visibility="Collapsed" />
                     </Grid>
 
-                    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
-                        <TextBlock x:Name="TxtPreviewInfo" Text="Imagen / Video" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                        <StackPanel Orientation="Horizontal" x:Name="PreviewMediaControls" Visibility="Collapsed">
-                            <Button x:Name="BtnPreviewPlay" Content="⏵" Width="36" Height="28" Click="BtnPreviewPlay_Click" Margin="0,0,6,0"/>
-                            <Button x:Name="BtnPreviewPause" Content="⏸" Width="36" Height="28" Click="BtnPreviewPause_Click" Margin="0,0,6,0"/>
-                            <Button x:Name="BtnPreviewStop" Content="⏹" Width="36" Height="28" Click="BtnPreviewStop_Click" />
+                    <StackPanel Grid.Row="1" Orientation="Vertical" HorizontalAlignment="Stretch" Margin="0,8,0,0">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                            <TextBlock x:Name="TxtPreviewInfo" Text="Imagen / Video" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <StackPanel Orientation="Horizontal" x:Name="PreviewMediaControls" Visibility="Collapsed">
+                                <Button x:Name="BtnPreviewPlayPause" Content="⏵" Width="36" Height="28" Click="BtnPreviewPlayPause_Click" Margin="0,0,6,0"/>
+                                <Button x:Name="BtnPreviewStop" Content="⏹" Width="36" Height="28" Click="BtnPreviewStop_Click" />
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+                                    <TextBlock Text="Vol" VerticalAlignment="Center" Margin="6,0,4,0" />
+                                    <Slider x:Name="PreviewVolumeSld" Width="90" Minimum="0" Maximum="100" ValueChanged="PreviewVolumeSld_ValueChanged" Value="75" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center" HorizontalAlignment="Stretch">
+                            <Slider x:Name="PreviewSldTimeline" Minimum="0" Maximum="1" Value="0" Width="220" Margin="0,0,8,0" PreviewMouseDown="PreviewSldTimeline_PreviewMouseDown" PreviewMouseUp="PreviewSldTimeline_PreviewMouseUp" ValueChanged="PreviewSldTimeline_ValueChanged" />
+                            <TextBlock x:Name="TxtPreviewCurrentTime" Text="00:00:00" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock x:Name="TxtPreviewTotalTime" Text="/00:00:00" VerticalAlignment="Center" />
                         </StackPanel>
                     </StackPanel>
                 </Grid>
@@ -157,12 +218,6 @@
                         <Button x:Name="BtnPanRight" Content="▶" Width="36" Height="28" Background="#A67C52" Foreground="White" Click="BtnPanRight_Click" Margin="0,0,6,0"/>
                         <Button x:Name="BtnPanDown" Content="▼" Width="36" Height="28" Background="#A67C52" Foreground="White" Click="BtnPanDown_Click" Margin="0,0,6,0"/>
                         <Button x:Name="BtnResetZoom" Content="Reset" Width="60" Height="28" Background="#A67C52" Foreground="White" Click="BtnResetZoom_Click"/>
-                    </StackPanel>
-
-                    <StackPanel Orientation="Horizontal" x:Name="MediaButtonsPanel" Visibility="Collapsed" VerticalAlignment="Center" Margin="12,0,0,0">
-                        <Button x:Name="BtnMediaPlay" Content="⏵" Width="36" Height="28" Click="BtnMediaPlay_Click" Margin="0,0,6,0"/>
-                        <Button x:Name="BtnMediaPause" Content="⏸" Width="36" Height="28" Click="BtnMediaPause_Click" Margin="0,0,6,0"/>
-                        <Button x:Name="BtnMediaStop" Content="⏹" Width="36" Height="28" Click="BtnMediaStop_Click"/>
                     </StackPanel>
                 </StackPanel>
             </Border>

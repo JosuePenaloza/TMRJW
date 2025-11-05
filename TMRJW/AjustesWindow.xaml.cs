@@ -15,21 +15,12 @@ namespace TMRJW
         {
             InitializeComponent();
 
-            // 🌟 0. LLENAR COMBOBOX CON MONITORES DISPONIBLES 🌟
-            CargarMonitoresDisponibles();
-
             // 1. Cargar la configuración al abrir la ventana
-            TxtImagenTextoAnioRuta.Text = Settings.Default.ImagenTextoAnio;
+            var settings = SettingsHelper.Load();
+            TxtImagenTextoAnioRuta.Text = settings.ImagenTextoAnio ?? string.Empty;
+            TxtFfmpegPath.Text = settings.FfmpegPath ?? string.Empty;
 
-            if (Settings.Default.MonitorSalidaIndex >= 0 &&
-                Settings.Default.MonitorSalidaIndex < CboMonitorSalida.Items.Count)
-            {
-                CboMonitorSalida.SelectedIndex = Settings.Default.MonitorSalidaIndex;
-            }
-            else
-            {
-                CboMonitorSalida.SelectedIndex = 0;
-            }
+            // La lista de monitores se completa en AjustesWindow_Loaded (PopulateMonitorsListNative)
         }
 
         // =====================================================
@@ -85,6 +76,23 @@ namespace TMRJW
                 MessageBoxImage.Information);
         }
 
+        private void BtnSeleccionarFfmpeg_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "FFmpeg executable|ffmpeg.exe",
+                Title = "Seleccionar ffmpeg.exe"
+            };
+
+            if (dlg.ShowDialog() == true)
+            {
+                // Guardar la carpeta que contiene bin (path hasta carpeta bin)
+                var exePath = dlg.FileName;
+                var binDir = System.IO.Path.GetDirectoryName(exePath) ?? exePath;
+                TxtFfmpegPath.Text = binDir;
+            }
+        }
+
         // =====================================================
         // 💾 GUARDAR AJUSTES
         // =====================================================
@@ -99,6 +107,36 @@ namespace TMRJW
                 MessageBoxButton.OK, MessageBoxImage.Information);
 
             this.Close();
+        }
+
+        // Handler renameado para compatibilidad con otro partial
+        private void BtnGuardarAjustes_SaveClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var settings = SettingsHelper.Load();
+
+                // monitor seleccionado (tag) - compatibilidad con earlier partial
+                if (CboMonitorSalida.SelectedItem is System.Windows.Controls.ComboBoxItem sel && sel.Tag is string devName)
+                    settings.SelectedMonitorDeviceName = devName;
+                else
+                    settings.SelectedMonitorDeviceName = null;
+
+                settings.ImagenTextoAnio = TxtImagenTextoAnioRuta.Text;
+
+                // Guardar ruta FFmpeg si el usuario la especificó
+                if (!string.IsNullOrWhiteSpace(TxtFfmpegPath.Text))
+                    settings.FfmpegPath = TxtFfmpegPath.Text;
+
+                SettingsHelper.Save(settings);
+
+                MessageBox.Show("Ajustes guardados.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                this.Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al guardar ajustes: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         // =====================================================

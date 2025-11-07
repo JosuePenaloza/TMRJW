@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 
 namespace TMRJW
 {
@@ -24,6 +25,127 @@ namespace TMRJW
         private string? _previewTempMediaPath;
         private string? _projectionTempMediaPath;
 
+        // Projection window instance managed by BrowserWindow when MainWindow is not present
+        private ProyeccionWindow? _localProyeccionWindow;
+
+        private ProyeccionWindow? EnsureProjectionWindow()
+        {
+            try
+            {
+                // Reuse existing ProyeccionWindow if present in App windows
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw)
+                    {
+                        _localProyeccionWindow = pw;
+                        return pw;
+                    }
+                }
+
+                // Create a new projection window and try to position it on the selected monitor
+                var projWin = new ProyeccionWindow();
+
+                // Load preferred monitor from settings
+                try
+                {
+                    var settings = SettingsHelper.Load();
+                    var selectedDevice = settings.SelectedMonitorDeviceName;
+                    var monitors = PlatformInterop.GetMonitorsNative();
+                    PlatformInterop.MonitorInfo? target = null;
+
+                    if (!string.IsNullOrEmpty(selectedDevice))
+                        target = monitors.Find(m => string.Equals(m.DeviceName, selectedDevice, StringComparison.OrdinalIgnoreCase));
+
+                    if (target == null)
+                        target = monitors.Find(m => !m.IsPrimary);
+                    if (target == null)
+                        target = monitors.Find(m => m.IsPrimary) ?? (monitors.Count > 0 ? monitors[0] : null);
+
+                    if (target != null)
+                    {
+                        projWin.WindowStartupLocation = WindowStartupLocation.Manual;
+                        projWin.Width = target.Width;
+                        projWin.Height = target.Height;
+                        projWin.WindowStyle = WindowStyle.None;
+                        projWin.ResizeMode = ResizeMode.NoResize;
+                        projWin.Topmost = true;
+                        projWin.ShowInTaskbar = false;
+                    }
+                }
+                catch { }
+
+                _localProyeccionWindow = projWin;
+                // Attach minimal events so BrowserWindow preview stays in sync
+                try
+                {
+                    projWin.PlaybackProgress -= LocalProjection_PlaybackProgress;
+                    projWin.PlaybackEnded -= LocalProjection_PlaybackEnded;
+                }
+                catch { }
+                projWin.PlaybackProgress += LocalProjection_PlaybackProgress;
+                projWin.PlaybackEnded += LocalProjection_PlaybackEnded;
+
+                projWin.Show();
+
+                // If we set manual startup and have monitor info, try to move window to exact monitor coordinates
+                try
+                {
+                    var settings = SettingsHelper.Load();
+                    var selectedDevice = settings.SelectedMonitorDeviceName;
+                    var monitors = PlatformInterop.GetMonitorsNative();
+                    PlatformInterop.MonitorInfo? target = null;
+                    if (!string.IsNullOrEmpty(selectedDevice))
+                        target = monitors.Find(m => string.Equals(m.DeviceName, selectedDevice, StringComparison.OrdinalIgnoreCase));
+                    if (target == null)
+                        target = monitors.Find(m => !m.IsPrimary) ?? monitors.Find(m => m.IsPrimary) ?? (monitors.Count>0?monitors[0]:null);
+
+                    if (target != null)
+                    {
+                        var helper = new System.Windows.Interop.WindowInteropHelper(projWin);
+                        IntPtr hWnd = helper.Handle;
+                        if (hWnd != IntPtr.Zero)
+                        {
+                            const uint SWP_SHOWWINDOW = 0x0040;
+                            IntPtr HWND_TOPMOST = new IntPtr(-1);
+                            SetWindowPos(hWnd, HWND_TOPMOST, target.X, target.Y, target.Width, target.Height, SWP_SHOWWINDOW);
+                        }
+                    }
+                }
+                catch { }
+
+                return _localProyeccionWindow;
+            }
+            catch
+            {
+                return _localProyeccionWindow;
+            }
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        private void LocalProjection_PlaybackProgress(TimeSpan pos, TimeSpan? dur)
+        {
+            try { UpdatePreviewPlayback(pos, dur); } catch { }
+        }
+
+        private void LocalProjection_PlaybackEnded()
+        {
+            try
+            {
+                var settings = SettingsHelper.Load();
+                var ruta = settings.ImagenTextoAnio;
+                if (!string.IsNullOrWhiteSpace(ruta) && File.Exists(ruta))
+                {
+                    var img = PlatformInterop.LoadBitmapFromFile(ruta);
+                    if (img != null)
+                    {
+                        try { _localProyeccionWindow?.MostrarImagenTexto(img); } catch { }
+                    }
+                }
+            }
+            catch { }
+        }
         // Copia un fichero local o descarga una URL remota a un fichero temporal y devuelve la ruta.
         // Si 'forProjection' es true, mantiene la referencia en _projectionTempMediaPath y elimina la anterior.
         public async Task<string?> CopyMediaToTempAsync(string pathOrUrl, bool forProjection = false)
@@ -179,6 +301,52 @@ namespace TMRJW
             catch { return null; }
         }
 
+        // Crear una BitmapImage renderizada desde texto para proyectar mensajes grandes
+        private BitmapImage CreateTextBitmapImage(string text, int width = 1920, int height = 1080, int dpi = 96, int fontSize = 60, double pixelsPerDip = 1.0)
+        {
+            try
+            {
+                var dv = new DrawingVisual();
+                using (var dc = dv.RenderOpen())
+                {
+                    dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, height));
+
+                    // Prepare FormattedText for each line to compute total height
+                    var lines = text.Split(new[] { '\n' }, StringSplitOptions.None);
+                    var formatted = lines.Select(l => new FormattedText(l, System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                        new Typeface("Segoe UI"), fontSize, Brushes.White, pixelsPerDip)).ToList();
+
+                    double totalHeight = formatted.Sum(f => f.Height) + Math.Max(0, formatted.Count - 1) * (fontSize * 0.25);
+                    double startY = (height - totalHeight) / 2.0;
+
+                    double y = Math.Max(0, startY);
+                    foreach (var f in formatted)
+                    {
+                        double x = (width - f.Width) / 2.0;
+                        dc.DrawText(f, new Point(Math.Max(0, x), y));
+                        y += f.Height + (fontSize * 0.25);
+                    }
+                }
+
+                var rtb = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
+                rtb.Render(dv);
+
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(rtb));
+                using var ms = new MemoryStream();
+                encoder.Save(ms);
+                ms.Position = 0;
+                var bi = new BitmapImage();
+                bi.BeginInit();
+                bi.CacheOption = BitmapCacheOption.OnLoad;
+                bi.StreamSource = ms;
+                bi.EndInit();
+                bi.Freeze();
+                return bi;
+            }
+            catch { return null; }
+        }
+
         // Compatibilidad: handler simple para el botón "Ir" en la barra de URL (si el XAML lo referencia)
         private void BtnGo_Click(object? sender, RoutedEventArgs e)
         {
@@ -295,7 +463,7 @@ namespace TMRJW
 
                             PreviewImage.Visibility = Visibility.Visible;
                             PreviewMediaControls.Visibility = Visibility.Visible; // mantener botones visibles
-                            TxtPreviewInfo.Text = isLocalFile ? $"Vista previa: vídeo {Path.GetFileName(s)}" : $"Vista preview: vídeo {u?.Host}";
+                            TxtPreviewInfo.Text = isLocalFile ? $"Vista preview: vídeo {Path.GetFileName(s)}" : $"Vista preview: vídeo {u?.Host}";
 
                             // Guardar ruta para que los botones del preview invoquen la reproducción en la proyección
                             _lastSelectedVideoPath = s;
@@ -365,7 +533,7 @@ namespace TMRJW
         }
 
         // Doble click -> proyectar
-        private void ImagesListBox_MouseDoubleClick(object? sender, MouseButtonEventArgs e)
+        private async void ImagesListBox_MouseDoubleClick(object? sender, MouseButtonEventArgs e)
         {
             try
             {
@@ -374,12 +542,57 @@ namespace TMRJW
                 if (selected is string s && !string.IsNullOrEmpty(s))
                 {
                     // si es ruta de vídeo o URL, notificar para que MainWindow reproduzca en proyección
-                    try { _onVideoSelected?.Invoke(s); } catch { }
+                    if (_onVideoSelected != null)
+                    {
+                        try { _onVideoSelected.Invoke(s); } catch { }
+                        return;
+                    }
+
+                    // Fallback: reproducir directamente usando ProyeccionWindow local
+                    try
+                    {
+                        var temp = await CopyMediaToTempAsync(s, forProjection: true).ConfigureAwait(false);
+                        await Dispatcher.InvokeAsync(() => {
+                            try
+                            {
+                                var pw = EnsureProjectionWindow();
+                                if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
+                                else
+                                {
+                                    if (Uri.TryCreate(s, UriKind.Absolute, out Uri? u) && (u.Scheme=="http"||u.Scheme=="https")) pw.PlayVideo(u);
+                                    else pw.PlayVideo(s);
+                                }
+                            }
+                            catch { }
+                        });
+                    }
+                    catch { }
+
                     return;
                 }
                 if (selected is VideoListItem vli && !string.IsNullOrEmpty(vli.FilePath))
                 {
-                    try { _onVideoSelected?.Invoke(vli.FilePath); } catch { }
+                    if (_onVideoSelected != null)
+                    {
+                        try { _onVideoSelected.Invoke(vli.FilePath); } catch { }
+                        return;
+                    }
+
+                    try
+                    {
+                        var temp = await CopyMediaToTempAsync(vli.FilePath, forProjection: true).ConfigureAwait(false);
+                        await Dispatcher.InvokeAsync(() => {
+                            try
+                            {
+                                var pw = EnsureProjectionWindow();
+                                if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
+                                else pw.PlayVideo(vli.FilePath);
+                            }
+                            catch { }
+                        });
+                    }
+                    catch { }
+
                     return;
                 }
 
@@ -419,7 +632,27 @@ namespace TMRJW
 
                 if (toProject != null)
                 {
-                    try { _onImageSelected?.Invoke(toProject); } catch { }
+                    try
+                    {
+                        if (_onImageSelected != null)
+                        {
+                            try { _onImageSelected.Invoke(toProject); } catch { }
+                        }
+                        else
+                        {
+                            // No MainWindow callback: project directly using local ProyeccionWindow
+                            try
+                            {
+                                var pw = EnsureProjectionWindow();
+                                if (pw != null)
+                                {
+                                    try { pw.StopVideo(); pw.SetLastWasTextoAnio(false); pw.MostrarImagenTexto(toProject); } catch { }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
                 }
             }
             catch { }
@@ -438,10 +671,17 @@ namespace TMRJW
             try
             {
                 // Al soltar el slider en el preview solicitamos a la proyección que haga seek
-                if (this.Owner is MainWindow mw)
+                try
                 {
-                    try { mw.SeekProjectionToFraction(PreviewSldTimeline.Value); } catch { }
+                    // Al soltar el slider en el preview solicitamos a la proyección que haga seek
+                    try
+                    {
+                        var pw = EnsureProjectionWindow();
+                        if (pw != null) pw.SeekToFraction(PreviewSldTimeline.Value);
+                    }
+                    catch { }
                 }
+                catch { }
             }
             catch { }
         }
@@ -455,21 +695,19 @@ namespace TMRJW
                 // opcional: actualizar texto localmente si conocemos duración desde la proyección
                 try
                 {
-                    if (this.Owner is MainWindow mw)
+                    // intentar obtener duración desde la proyección
+                    try
                     {
-                        // intentar obtener duración desde la proyección
-                        try
+                        var pw = EnsureProjectionWindow();
+                        var dur = pw?.GetVideoDuration();
+                        if (dur.HasValue)
                         {
-                            var dur = mw.GetProjectionDuration();
-                            if (dur.HasValue)
-                            {
-                                var pos = TimeSpan.FromSeconds(PreviewSldTimeline.Value * dur.Value.TotalSeconds);
-                                TxtPreviewCurrentTime.Text = pos.ToString(@"hh\:mm\:ss");
-                                TxtPreviewTotalTime.Text = "/" + dur.Value.ToString(@"hh\:mm\:ss");
-                            }
+                            var pos = TimeSpan.FromSeconds(PreviewSldTimeline.Value * dur.Value.TotalSeconds);
+                            TxtPreviewCurrentTime.Text = pos.ToString(@"hh\:mm\:ss");
+                            TxtPreviewTotalTime.Text = "/" + dur.Value.ToString(@"hh\:mm\:ss");
                         }
-                        catch { }
                     }
+                    catch { }
                 }
                 catch { }
             }

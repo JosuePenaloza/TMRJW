@@ -107,12 +107,12 @@ namespace TMRJW
                     catch { }
                 }
 
-                MessageBox.Show($"Capturadas {addedImages} imágenes y {addedVideos} vídeos desde la página.", "Captura completa", MessageBoxButton.OK, MessageBoxImage.Information);
+                try { Dispatcher.Invoke(() => { var sa = new SilentAlertWindow($"Capturadas {addedImages} imágenes y {addedVideos} vídeos desde la página.", "Captura completa"); sa.Owner = this; sa.ShowDialog(); }); } catch { }
                 try { UpdateWrapPanelItemSize(); } catch { }
             }
             catch
             {
-                MessageBox.Show("Error al capturar imágenes o vídeos de la página.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                try { Dispatcher.Invoke(() => { var sa = new SilentAlertWindow("Error al capturar imágenes o vídeos de la página.", "Error"); sa.Owner = this; sa.ShowDialog(); }); } catch { }
             }
             finally
             {
@@ -157,7 +157,8 @@ namespace TMRJW
                 if (_isDownloadingImage)
                 {
                     _projectionWaitingForImage = true;
-                    MessageBox.Show("Proyección encendida: esperando a que la imagen termine de descargarse...", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // mostrar alerta silenciosa en ventana
+                    try { Dispatcher.Invoke(() => { var sa = new SilentAlertWindow("Proyección encendida: esperando a que la imagen termine de descargarse...", "Información"); sa.Owner = this; sa.ShowDialog(); }); } catch { }
                     return;
                 }
 
@@ -191,23 +192,22 @@ namespace TMRJW
                 }
 
                 // Nada disponible
-                MessageBox.Show("No hay imagen seleccionada para proyectar. Selecciona una imagen en el inventario o en la previsualización.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                try { Dispatcher.Invoke(() => { var sa = new SilentAlertWindow("No hay imagen seleccionada para proyectar. Selecciona una imagen en el inventario o en la previsualización.", "Información"); sa.Owner = this; sa.ShowDialog(); }); } catch { }
             }
             else
             {
-                // Al apagar: notificar MainWindow para desactivar la proyección (si existe)
-                if (this.Owner is MainWindow mw)
+                // Al apagar: ocultar o cerrar cualquier ventana de proyección manejada localmente
+                try
                 {
-                    try
+                    foreach (Window w in Application.Current.Windows)
                     {
-                        var projBtn = mw.FindName("BtnProyectarHDMI") as System.Windows.Controls.Button;
-                        if (projBtn != null)
+                        if (w is ProyeccionWindow pw)
                         {
-                            projBtn.Dispatcher.Invoke(() => projBtn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)));
+                            try { pw.Hide(); } catch { }
                         }
                     }
-                    catch { }
                 }
+                catch { }
             }
         }
 
@@ -278,22 +278,45 @@ namespace TMRJW
 
         private void BtnTextoDelAnio_Click(object sender, RoutedEventArgs e)
         {
-            // Intentar delegar a MainWindow si existe (dispara su botón de Texto del Año)
-            if (this.Owner is MainWindow mw)
+            // Mostrar Texto del Año directamente en la ventana de proyección local (no depender de MainWindow)
+            try
             {
-                try
+                var pw = EnsureProjectionWindow();
+                if (pw != null)
                 {
-                    var btn = mw.FindName("BtnTextoDelAnio") as System.Windows.Controls.Button;
-                    if (btn != null)
+                    // Intentar con la imagen de ajustes
+                    try
                     {
-                        btn.Dispatcher.Invoke(() => btn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)));
-                        return;
+                        var settings = SettingsHelper.Load();
+                        var ruta = settings.ImagenTextoAnio;
+                        if (!string.IsNullOrWhiteSpace(ruta) && File.Exists(ruta))
+                        {
+                            var img = PlatformInterop.LoadBitmapFromFile(ruta);
+                            if (img != null)
+                            {
+                                try { pw.StopVideo(); pw.SetLastWasTextoAnio(true); pw.MostrarImagenTexto(img); try { pw.Show(); pw.Activate(); } catch { } return; } catch { }
+                            }
+                        }
                     }
-                }
-                catch { }
-            }
+                    catch { }
 
-            MessageBox.Show("Acción: proyectar 'Texto del Año' (no se encontró MainWindow).", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Como último recurso, generar texto
+                    try
+                    {
+                        int targetW = (int)Math.Max(800, pw.Width > 0 ? pw.Width : 1920);
+                        int targetH = (int)Math.Max(600, pw.Height > 0 ? pw.Height : 1080);
+                        int fontSize = Math.Max(36, targetH / 18);
+                        var txt = "Denle a Jehová\nla gloria que su nombre merece\n(Salmo 96:8)";
+                        var bi = CreateTextBitmapImage(txt, targetW, targetH, 96, fontSize);
+                        if (bi != null) { pw.MostrarImagenTexto(bi); try { pw.Show(); pw.Activate(); } catch { } }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            // Fallback informativo silencioso
+            try { Dispatcher.Invoke(() => { var sa = new SilentAlertWindow("Acción: proyectar 'Texto del Año' (no se encontró MainWindow).", "Información"); sa.Owner = this; sa.ShowDialog(); }); } catch { }
         }
 
         // ---------------------------------------
@@ -322,11 +345,9 @@ namespace TMRJW
         {
             try
             {
-                // Si el InventoryTabs/otros necesitan refrescar selección de monitor, delegar a MainWindow
-                if (this.Owner is MainWindow mw)
-                {
-                    try { mw.OpenProyeccionOnSelectedMonitor(); } catch { }
-                }
+                // Recrear/actualizar ventana de proyección según nuevos ajustes
+                try { if (_localProyeccionWindow != null) { _localProyeccionWindow.Close(); _localProyeccionWindow = null; } } catch { }
+                try { EnsureProjectionWindow(); } catch { }
             }
             catch { }
         }
@@ -392,32 +413,50 @@ namespace TMRJW
         }
 
         // Play/Pause toggle for preview
-        private void BtnPreviewPlayPause_Click(object sender, RoutedEventArgs e)
+        private async void BtnPreviewPlayPause_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                // En la opción solicitada, el preview no reproduce localmente. Los botones deben controlar la proyección.
-                if (this.Owner is MainWindow mw)
+                // Controlar la reproducción en la ProyeccionWindow directamente
+                try
                 {
+                    var pw = EnsureProjectionWindow();
+                    if (pw == null) return;
+
+                    // Try to resume if paused
                     try
                     {
-                        if (mw.ProyeccionWindowIsPlaying())
-                        {
-                            mw.PauseProjection();
-                            BtnPreviewPlayPause.Content = "⏵";
-                        }
-                        else
-                        {
-                            // Si hay un vídeo seleccionado en el BrowserWindow, pedir reproducir en proyección
-                            if (!string.IsNullOrWhiteSpace(_lastSelectedVideoPath))
-                            {
-                                mw.PlayProjectionFromPath(_lastSelectedVideoPath);
-                                BtnPreviewPlayPause.Content = "⏸";
-                            }
-                        }
+                        if (pw.TryResume()) { BtnPreviewPlayPause.Content = "⏸"; return; }
                     }
                     catch { }
+
+                    if (pw.IsPlayingVideo())
+                    {
+                        pw.PauseVideo();
+                        BtnPreviewPlayPause.Content = "⏵";
+                        return;
+                    }
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(_lastSelectedVideoPath)) return;
+                        // Pedir que BrowserWindow libere su preview
+                        try { StopPreviewPlaybackAndReset(); } catch { }
+
+                        // Copiar a temporal para evitar locks
+                        string? temp = null;
+                        try { temp = await CopyMediaToTempAsync(_lastSelectedVideoPath, forProjection: true).ConfigureAwait(false); } catch { }
+
+                        if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
+                        else
+                        {
+                            if (Uri.TryCreate(_lastSelectedVideoPath, UriKind.Absolute, out Uri? u) && (u.Scheme=="http"||u.Scheme=="https")) pw.PlayVideo(u);
+                            else pw.PlayVideo(_lastSelectedVideoPath);
+                        }
+                        BtnPreviewPlayPause.Content = "⏸";
+                        return;
+                    }
                 }
+                catch { }
             }
             catch { }
         }
@@ -426,10 +465,13 @@ namespace TMRJW
         {
             try
             {
-                if (this.Owner is MainWindow mw)
+                try
                 {
-                    try { mw.StopProjection(); BtnPreviewPlayPause.Content = "⏵"; } catch { }
+                    var pw = EnsureProjectionWindow();
+                    if (pw != null) pw.StopVideo();
+                    BtnPreviewPlayPause.Content = "⏵";
                 }
+                catch { }
             }
             catch { }
         }

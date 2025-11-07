@@ -25,6 +25,9 @@ namespace TMRJW
         public event Action<TimeSpan, TimeSpan?>? PlaybackProgress;
         public event Action? PlaybackEnded;
 
+        // Indica si la última imagen mostrada fue el Texto del Año para ajustar la transición
+        private bool _lastWasTextoAnio = false;
+
         public ProyeccionWindow()
         {
             InitializeComponent();
@@ -124,6 +127,24 @@ namespace TMRJW
                     // Asegurar que ambas imágenes están visibles para el cross-fade
                     ProjectionImageA.Visibility = Visibility.Visible;
                     ProjectionImageB.Visibility = Visibility.Visible;
+
+                    // Si la última imagen mostrada fue Texto del Año, evitar animación para prevenir flash
+                    if (_lastWasTextoAnio)
+                    {
+                        try
+                        {
+                            // asignación directa sin animación
+                            _front.BeginAnimation(UIElement.OpacityProperty, null);
+                            _back.BeginAnimation(UIElement.OpacityProperty, null);
+                            _front.Source = imagen;
+                            _front.Opacity = 1.0;
+                            _back.Source = null;
+                            _back.Opacity = 0.0;
+                            _lastWasTextoAnio = false;
+                            return;
+                        }
+                        catch { /* si falla, continuar con el flujo normal */ }
+                    }
 
                     // Si es la primera imagen (front no tiene Source) simplemente asignarla sin animación
                     if (_front.Source == null && (_back.Source == null))
@@ -334,6 +355,27 @@ namespace TMRJW
  }), DispatcherPriority.Normal);
  }
 
+ // Try to resume playback without reloading the source. Returns true if resumed.
+ public bool TryResume()
+ {
+ try
+ {
+ if (ProjectionMedia == null) return false;
+ // If a source is already loaded and we're not playing, resume
+ if (ProjectionMedia.Source != null && !_isPlayingVideo)
+ {
+ Dispatcher.BeginInvoke((Action)(() =>
+ {
+ try { ProjectionMedia.Play(); _isPlayingVideo = true; try { _playbackTimer?.Start(); } catch { } }
+ catch { }
+ }), DispatcherPriority.Normal);
+ return true;
+ }
+ }
+ catch { }
+ return false;
+ }
+
  public void StopVideo()
  {
  Dispatcher.BeginInvoke((Action)(() =>
@@ -373,6 +415,9 @@ namespace TMRJW
  return _isPlayingVideo;
  }
 
+        // Expose current source string (if any)
+        public string? CurrentVideoSource => ProjectionMedia?.Source?.OriginalString;
+
         // Permite buscar a una fracción (0..1) del video
         public void SeekToFraction(double fraction)
         {
@@ -381,7 +426,7 @@ namespace TMRJW
                 if (ProjectionMedia == null) return;
                 if (!ProjectionMedia.NaturalDuration.HasTimeSpan) return;
                 var dur = ProjectionMedia.NaturalDuration.TimeSpan;
-                if (dur.TotalSeconds <=0) return;
+                if (dur.TotalSeconds <= 0) return;
                 var pos = TimeSpan.FromSeconds(Math.Max(0.0, Math.Min(1.0, fraction)) * dur.TotalSeconds);
                 Dispatcher.BeginInvoke((Action)(() =>
                 {
@@ -393,6 +438,22 @@ namespace TMRJW
                 }), DispatcherPriority.Normal);
             }
             catch { }
+        }
+
+        // Obtiene la duración del video si está disponible
+        public TimeSpan? GetVideoDuration()
+        {
+            try
+            {
+                if (ProjectionMedia == null) return null;
+                return ProjectionMedia.NaturalDuration.HasTimeSpan ? ProjectionMedia.NaturalDuration.TimeSpan : (TimeSpan?)null;
+            }
+            catch { return null; }
+        }
+
+        public void SetLastWasTextoAnio(bool v)
+        {
+            _lastWasTextoAnio = v;
         }
     }
 }

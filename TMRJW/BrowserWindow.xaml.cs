@@ -12,6 +12,7 @@ using System.Windows.Input;
 using System.Net.Http;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.IO.Compression;
 
 namespace TMRJW
 {
@@ -61,6 +62,7 @@ namespace TMRJW
                 // crear pestaña por defecto
                 EnsureTabExists(DefaultTabKey, "Todas");
                 SelectTab(DefaultTabKey);
+                try { InventoryTabs.SelectionChanged += (ss, ee) => { try { UpdateWrapPanelItemSize(); } catch { } }; } catch { }
             };
 
             // Registrar eventos para interacción con PreviewImage (zoom/pan con Espacio)
@@ -118,9 +120,16 @@ namespace TMRJW
                 {
                     if (key != null && key.StartsWith("Videos:", StringComparison.OrdinalIgnoreCase))
                         lb.ItemTemplate = (DataTemplate)FindResource("VideoItemTemplate");
-                    else if (string.Equals(key, DefaultTabKey, StringComparison.OrdinalIgnoreCase) || (key != null && key.StartsWith("Carpeta:", StringComparison.OrdinalIgnoreCase)))
-                        lb.ItemTemplate = (DataTemplate)FindResource("ListItemTemplate");
+                    else if (key != null && key.StartsWith("Carpeta:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Tratar la carpeta de imágenes cargadas como miniaturas en lugar de lista vertical
+                        if (string.Equals(key, "Carpeta: Imágenes Cargadas", StringComparison.OrdinalIgnoreCase))
+                            lb.ItemTemplate = (DataTemplate)FindResource("ThumbnailTemplate");
+                        else
+                            lb.ItemTemplate = (DataTemplate)FindResource("ListItemTemplate");
+                    }
                     else
+                        // Por defecto (incluye 'Todas' y pestanas EPUB/otras) usar miniaturas
                         lb.ItemTemplate = (DataTemplate)FindResource("ThumbnailTemplate");
                 }
                 catch
@@ -136,12 +145,25 @@ namespace TMRJW
                     spFactory.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
                     lb.ItemsPanel = new ItemsPanelTemplate(spFactory);
                 }
-                else if (string.Equals(key, DefaultTabKey, StringComparison.OrdinalIgnoreCase) || (key != null && key.StartsWith("Carpeta:", StringComparison.OrdinalIgnoreCase)))
+                else if (key != null && key.StartsWith("Carpeta:", StringComparison.OrdinalIgnoreCase))
                 {
-                    // lista vertical para 'Todas' y carpetas de imágenes
-                    var spFactory = new FrameworkElementFactory(typeof(StackPanel));
-                    spFactory.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
-                    lb.ItemsPanel = new ItemsPanelTemplate(spFactory);
+                    // Por defecto las carpetas son listas verticales, excepto la carpeta de 'Imágenes Cargadas'
+                    if (string.Equals(key, "Carpeta: Imágenes Cargadas", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var factory2 = new FrameworkElementFactory(typeof(WrapPanel));
+                        factory2.SetValue(WrapPanel.OrientationProperty, Orientation.Horizontal);
+                        lb.ItemsPanel = new ItemsPanelTemplate(factory2);
+
+                        lb.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+                        lb.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+                        lb.SizeChanged += (ss, ee) => { try { UpdateWrapPanelItemSize(); } catch { } };
+                    }
+                    else
+                    {
+                        var spFactory = new FrameworkElementFactory(typeof(StackPanel));
+                        spFactory.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
+                        lb.ItemsPanel = new ItemsPanelTemplate(spFactory);
+                    }
                 }
                 else
                 {
@@ -149,6 +171,13 @@ namespace TMRJW
                     var factory = new FrameworkElementFactory(typeof(WrapPanel));
                     factory.SetValue(WrapPanel.OrientationProperty, Orientation.Horizontal);
                     lb.ItemsPanel = new ItemsPanelTemplate(factory);
+
+                    // Configurar scrollbars para que se comporte como grid responsivo
+                    lb.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+                    lb.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+
+                    // Cuando cambie el tamaño del ListBox recalcular el tamaño de los items
+                    lb.SizeChanged += (ss, ee) => { try { UpdateWrapPanelItemSize(); } catch { } };
                 }
 
                 // handlers que antes usábamos en ImagesListBox: selección y doble click debe actualizar preview / proyectar
@@ -557,6 +586,72 @@ namespace TMRJW
             catch
             {
                 // ignorar
+            }
+        }
+
+        // Handler para el botón EPUB en la vista de navegador: carga un EPUB y crea una pestaña con sus imágenes
+        private async void BtnLoadEpubNav_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var ofd = new Microsoft.Win32.OpenFileDialog()
+                {
+                    Filter = "Archivos EPUB|*.epub",
+                    Title = "Seleccionar archivo EPUB"
+                };
+
+                if (ofd.ShowDialog() != true) return;
+
+                string path = ofd.FileName;
+                if (!System.IO.File.Exists(path)) return;
+
+                // Extraer imágenes directamente del EPUB (zip) para evitar depender de la estructura interna del parser
+                var images = new List<BitmapImage>();
+                try
+                {
+                    using var za = ZipFile.OpenRead(path);
+                    var allowedExt = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" };
+                    foreach (var entry in za.Entries)
+                    {
+                        try
+                        {
+                            var ext = Path.GetExtension(entry.Name);
+                            if (string.IsNullOrEmpty(ext) || !allowedExt.Contains(ext)) continue;
+                            using var s = entry.Open();
+                            var ms = new MemoryStream();
+                            s.CopyTo(ms);
+                            ms.Position = 0;
+                            var bi = new BitmapImage();
+                            bi.BeginInit();
+                            bi.CacheOption = BitmapCacheOption.OnLoad;
+                            bi.StreamSource = ms;
+                            bi.EndInit();
+                            bi.Freeze();
+                            images.Add(bi);
+                        }
+                        catch { }
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                if (!images.Any())
+                {
+                    MessageBox.Show("No se encontraron imágenes en el EPUB.", "EPUB", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                // Crear pestaña nueva en InventoryTabs con las imágenes
+                string key = "EPUB:" + Path.GetFileNameWithoutExtension(path);
+                EnsureTabExists(key, Path.GetFileName(path));
+                AddImagesToTab(key, images.Cast<object>(), header: Path.GetFileName(path), addToAll: true);
+                SelectTab(key);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al cargar EPUB: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
     }

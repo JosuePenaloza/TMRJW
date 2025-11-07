@@ -125,9 +125,8 @@
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="6,0,0,0">
                     <Button x:Name="BtnGo" Content="Ir" Width="44" Height="24" Margin="0,0,6,0" Click="BtnGo_Click"/>
+                    <Button x:Name="BtnLoadEpubNav" Content="📚 EPUB" Width="74" Height="24" Margin="0,0,6,0" Click="BtnLoadEpubNav_Click" ToolTip="Cargar EPUB y crear pestaña con sus imágenes" />
                     <Button x:Name="BtnRefresh" Content="Actualizar" Background="#FF4D4D" Foreground="White" Width="80" Height="28" Click="BtnRefreshImages_Click" Margin="0,0,6,0" Visibility="Collapsed"/>
-                    <Button x:Name="BtnCaptureFromPage" Content="Capturar" Background="#E53935" Foreground="White" Width="80" Height="28" Click="BtnCaptureFromPage_Click"/>
-                    <!-- Botón Ajustes al lado derecho del botón Capturar -->
                     <Button x:Name="BtnOpenAjustes" Content="⚙" Background="#1976D2" Foreground="White" Width="36" Height="28" Margin="6,0,0,0" Click="BtnOpenAjustes_Click" ToolTip="Ajustes" />
                     <!-- Indicador pequeño mientras se analizan/descargan imágenes -->
                     <ProgressBar x:Name="CaptureIndicator" Width="18" Height="18" Margin="6,5,0,0" IsIndeterminate="True" Visibility="Collapsed" />

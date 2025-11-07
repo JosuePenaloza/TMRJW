@@ -333,10 +333,10 @@ namespace TMRJW
         {
             try
             {
-                var ajustes = new AjustesWindow { Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-                ajustes.ShowDialog();
-                // después de cerrar ajustes, recargar monitores en caso de que se cambiara selección
-                try { PopulateMonitorsAfterSettingsChange(); } catch { }
+                // Abrir ajustes como ventana modeless y sin Owner para evitar que su ciclo de vida
+                // afecte a la ventana de proyección.
+                var ajustes = new AjustesWindow { WindowStartupLocation = WindowStartupLocation.CenterScreen };
+                ajustes.Show();
             }
             catch { }
         }
@@ -345,9 +345,39 @@ namespace TMRJW
         {
             try
             {
-                // Recrear/actualizar ventana de proyección según nuevos ajustes
-                try { if (_localProyeccionWindow != null) { _localProyeccionWindow.Close(); _localProyeccionWindow = null; } } catch { }
-                try { EnsureProjectionWindow(); } catch { }
+                // Intentar reposicionar la ventana de proyección existente según los ajustes
+                try
+                {
+                    var settings = SettingsHelper.Load();
+                    var selectedDevice = settings.SelectedMonitorDeviceName;
+                    var monitors = PlatformInterop.GetMonitorsNative();
+                    PlatformInterop.MonitorInfo? target = null;
+
+                    if (!string.IsNullOrEmpty(selectedDevice))
+                        target = monitors.Find(m => string.Equals(m.DeviceName, selectedDevice, StringComparison.OrdinalIgnoreCase));
+
+                    if (target == null)
+                        target = monitors.Find(m => !m.IsPrimary);
+                    if (target == null)
+                        target = monitors.Find(m => m.IsPrimary) ?? (monitors.Count > 0 ? monitors[0] : null);
+
+                    if (target != null && _localProyeccionWindow != null)
+                    {
+                        try
+                        {
+                            var helper = new System.Windows.Interop.WindowInteropHelper(_localProyeccionWindow);
+                            IntPtr hWnd = helper.Handle;
+                            if (hWnd != IntPtr.Zero)
+                            {
+                                const uint SWP_SHOWWINDOW = 0x0040;
+                                IntPtr HWND_TOPMOST = new IntPtr(-1);
+                                SetWindowPos(hWnd, HWND_TOPMOST, target.X, target.Y, target.Width, target.Height, SWP_SHOWWINDOW);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
             }
             catch { }
         }

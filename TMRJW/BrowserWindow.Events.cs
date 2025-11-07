@@ -41,7 +41,6 @@ namespace TMRJW
                 Dispatcher.Invoke(() =>
                 {
                     try { CaptureIndicator.Visibility = Visibility.Visible; } catch { }
-                    try { BtnCaptureFromPage.IsEnabled = false; } catch { }
                 });
 
                 var url = WebBrowserControl.Source?.AbsoluteUri ?? UrlBox.Text;
@@ -123,7 +122,6 @@ namespace TMRJW
                     Dispatcher.Invoke(() =>
                     {
                         try { CaptureIndicator.Visibility = Visibility.Collapsed; } catch { }
-                        try { BtnCaptureFromPage.IsEnabled = true; } catch { }
                     });
                 }
                 catch { }

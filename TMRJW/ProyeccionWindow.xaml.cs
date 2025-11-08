@@ -347,9 +347,12 @@ namespace TMRJW
  {
  try
  {
+ // Pause playback but keep the Media element visible so the paused frame remains shown
  ProjectionMedia.Pause();
  _isPlayingVideo = false;
  try { _playbackTimer?.Stop(); } catch { }
+ // Do not change ProjectionMedia.Visibility or image visibility here;
+ // keeping the Media visible preserves the paused frame for inspection.
  }
  catch { }
  }), DispatcherPriority.Normal);
@@ -366,7 +369,13 @@ namespace TMRJW
  {
  Dispatcher.BeginInvoke((Action)(() =>
  {
- try { ProjectionMedia.Play(); _isPlayingVideo = true; try { _playbackTimer?.Start(); } catch { } }
+ try
+ {
+ // Mostrar media y ocultar imágenes
+ try { ProjectionImageA.Visibility = Visibility.Collapsed; ProjectionImageB.Visibility = Visibility.Collapsed; } catch { }
+ try { ProjectionMedia.Visibility = Visibility.Visible; } catch { }
+ ProjectionMedia.Play(); _isPlayingVideo = true; try { _playbackTimer?.Start(); } catch { }
+ }
  catch { }
  }), DispatcherPriority.Normal);
  return true;

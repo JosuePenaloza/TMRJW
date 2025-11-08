@@ -48,6 +48,9 @@ namespace TMRJW
         // Evitar añadir imágenes web duplicadas (clave: URI absoluta)
         private readonly HashSet<string> _seenImageUris = new();
 
+        // Última imagen proyectada localmente (para mantenerla visible durante reproducción de audio)
+        private BitmapImage? _lastProjectedImage;
+
         public BrowserWindow()
         {
             InitializeComponent();
@@ -63,7 +66,30 @@ namespace TMRJW
                 EnsureTabExists(DefaultTabKey, "Todas");
                 SelectTab(DefaultTabKey);
                 try { InventoryTabs.SelectionChanged += (ss, ee) => { try { UpdateWrapPanelItemSize(); } catch { } }; } catch { }
+                try { PreviewVolumeSld.ValueChanged += (ss, ee) => { try { PreviewVolumeSld_ValueChanged_Local(ss, ee); } catch { } }; } catch { }
             };
+
+            // Asegurar que PreviewMedia notifica para mostrar controles cuando abra/termine
+            try
+            {
+                PreviewMedia.MediaOpened += (s, e) =>
+                {
+                    try
+                    {
+                        PreviewMediaControls.Visibility = Visibility.Visible;
+                        BtnPreviewPlayPause.Content = "⏸";
+                        _previewIsPlaying = true;
+                        StartPreviewTimer();
+                    }
+                    catch { }
+                };
+
+                PreviewMedia.MediaEnded += (s, e) =>
+                {
+                    try { StopPreviewPlaybackAndReset(); } catch { }
+                };
+            }
+            catch { }
 
             // Registrar eventos para interacción con PreviewImage (zoom/pan con Espacio)
             this.PreviewKeyDown += Window_PreviewKeyDown;
@@ -120,6 +146,8 @@ namespace TMRJW
                 {
                     if (key != null && key.StartsWith("Videos:", StringComparison.OrdinalIgnoreCase))
                         lb.ItemTemplate = (DataTemplate)FindResource("VideoItemTemplate");
+                    else if (key != null && key.StartsWith("Audios:", StringComparison.OrdinalIgnoreCase))
+                        lb.ItemTemplate = (DataTemplate)FindResource("AudioItemTemplate");
                     else if (key != null && key.StartsWith("Carpeta:", StringComparison.OrdinalIgnoreCase))
                     {
                         // Tratar la carpeta de imágenes cargadas como miniaturas en lugar de lista vertical
@@ -141,6 +169,13 @@ namespace TMRJW
                 if (key != null && key.StartsWith("Videos:", StringComparison.OrdinalIgnoreCase))
                 {
                     // lista vertical para vídeos
+                    var spFactory = new FrameworkElementFactory(typeof(StackPanel));
+                    spFactory.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
+                    lb.ItemsPanel = new ItemsPanelTemplate(spFactory);
+                }
+                else if (key != null && key.StartsWith("Audios:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // lista vertical para audios
                     var spFactory = new FrameworkElementFactory(typeof(StackPanel));
                     spFactory.SetValue(StackPanel.OrientationProperty, Orientation.Vertical);
                     lb.ItemsPanel = new ItemsPanelTemplate(spFactory);
@@ -225,6 +260,13 @@ namespace TMRJW
                             }
                             catch { }
                         });
+                    }
+
+                    // Si es cadena y corresponde a audios, envolver en AudioListItem
+                    if (item is string sa && !string.IsNullOrWhiteSpace(sa) && key != null && key.StartsWith("Audios:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var a = new AudioListItem { FilePath = sa };
+                        toAdd = a;
                     }
 
                     if (addToAll)

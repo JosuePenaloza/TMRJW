@@ -16,6 +16,9 @@ namespace TMRJW
         // Última ruta seleccionada que representa un vídeo (archivo local o URL)
         private string? _lastSelectedVideoPath;
 
+        // Indica si el preview current es audio (para no interrumpir al seleccionar imágenes)
+        private bool _previewIsAudio = false;
+
         // Compatibilidad: exponer callbacks para que MainWindow los registre
         public void SetImageSelectedCallback(Action<BitmapImage> callback) => _onImageSelected = callback;
         private Action<string?>? _onVideoSelected;
@@ -234,6 +237,9 @@ namespace TMRJW
                 {
                     try
                     {
+                        // Stop any preview audio playback to avoid overlap
+                        try { StopPreviewPlaybackAndReset(); } catch { }
+
                         bool isRemote = Uri.TryCreate(pathOrUrl, UriKind.Absolute, out Uri? u) && (u.Scheme == "http" || u.Scheme == "https");
 
                         PreviewImage.Visibility = Visibility.Collapsed;
@@ -390,34 +396,39 @@ namespace TMRJW
                 if (selected is BitmapImage bi)
                 {
                     // Imagen seleccionada
-                    PreviewMedia.Stop();
-                    PreviewMedia.Source = null;
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-
-                    PreviewImage.Visibility = Visibility.Visible;
-                    PreviewImage.Source = bi;
-
-                    // ocultar controles de media
-                    PreviewMediaControls.Visibility = Visibility.Collapsed;
-
-                    TxtPreviewInfo.Text = "Vista previa: imagen seleccionada (single click)";
-                    try { BtnResetZoom_Click(null, null); } catch { }
+                    // Si hay un audio en preview reproduciéndose, NO lo detenemos al seleccionar una imagen.
+                    if (!(_previewIsPlaying && _previewIsAudio))
+                    {
+                        PreviewMedia.Stop();
+                        PreviewMedia.Source = null;
+                        PreviewMedia.Visibility = Visibility.Collapsed;
+                        // ocultar controles de media
+                        PreviewMediaControls.Visibility = Visibility.Collapsed;
+                        PreviewImage.Visibility = Visibility.Visible;
+                        PreviewImage.Source = bi;
+                    }
+                    else
+                    {
+                        // Mantener audio: no cambiar la visibilidad del PreviewMedia. Actualizar sólo la info de texto si hace falta.
+                        TxtPreviewInfo.Text = "Vista preview: imagen seleccionada (audio en reproducción)";
+                    }
                 }
                 else if (selected is CachedImage ci)
                 {
                     // Imagen cacheada
-                    PreviewMedia.Stop();
-                    PreviewMedia.Source = null;
-                    PreviewMedia.Visibility = Visibility.Collapsed;
-
-                    PreviewImage.Visibility = Visibility.Visible;
-                    PreviewImage.Source = ci.Image;
-
-                    // ocultar controles de media
-                    PreviewMediaControls.Visibility = Visibility.Collapsed;
-
-                    TxtPreviewInfo.Text = $"Vista previa: {Path.GetFileName(ci.FilePath)}";
-                    try { BtnResetZoom_Click(null, null); } catch { }
+                    if (!(_previewIsPlaying && _previewIsAudio))
+                    {
+                        PreviewMedia.Stop();
+                        PreviewMedia.Source = null;
+                        PreviewMedia.Visibility = Visibility.Collapsed;
+                        PreviewMediaControls.Visibility = Visibility.Collapsed;
+                        PreviewImage.Visibility = Visibility.Visible;
+                        PreviewImage.Source = ci.Image;
+                    }
+                    else
+                    {
+                        TxtPreviewInfo.Text = $"Vista preview: {Path.GetFileName(ci.FilePath)} (audio en reproducción)";
+                    }
                 }
                 else if (selected is string s && (!string.IsNullOrEmpty(s)))
                 {
@@ -431,9 +442,12 @@ namespace TMRJW
                         {
                             // MOSTRAR SOLO THUMBNAIL en preview (no reproducir localmente). Los controles multimedia
                             // en el preview controlarán la proyección.
-                            PreviewMedia.Stop();
-                            PreviewMedia.Source = null;
-                            PreviewMedia.Visibility = Visibility.Collapsed;
+                            if (!(_previewIsPlaying && _previewIsAudio))
+                            {
+                                PreviewMedia.Stop();
+                                PreviewMedia.Source = null;
+                                PreviewMedia.Visibility = Visibility.Collapsed;
+                            }
 
                             // Intentar obtener thumbnail del fichero (icono) como preview
                             BitmapImage? thumb = null;
@@ -461,7 +475,8 @@ namespace TMRJW
                                 PreviewImage.Source = CreateGenericPlaceholderThumbnail(320, 180);
                             }
 
-                            PreviewImage.Visibility = Visibility.Visible;
+                            // Si hay audio en preview no forzar la visibilidad del media; aun así mostramos controles
+                            if (!(_previewIsPlaying && _previewIsAudio)) PreviewImage.Visibility = Visibility.Visible;
                             PreviewMediaControls.Visibility = Visibility.Visible; // mantener botones visibles
                             TxtPreviewInfo.Text = isLocalFile ? $"Vista preview: vídeo {Path.GetFileName(s)}" : $"Vista preview: vídeo {u?.Host}";
 
@@ -496,18 +511,44 @@ namespace TMRJW
                 {
                     try
                     {
-                        PreviewMedia.Stop();
-                        PreviewMedia.Source = null;
-                        PreviewMedia.Visibility = Visibility.Collapsed;
+                        // Cambiar preview a thumbnail de vídeo. Si hay audio en preview, no detenerlo automáticamente.
+                        if (!(_previewIsPlaying && _previewIsAudio))
+                        {
+                            PreviewMedia.Stop();
+                            PreviewMedia.Source = null;
+                            PreviewMedia.Visibility = Visibility.Collapsed;
+                            PreviewImage.Visibility = Visibility.Visible;
+                        }
 
                         if (vli.Thumbnail != null) PreviewImage.Source = vli.Thumbnail;
                         else PreviewImage.Source = CreateGenericPlaceholderThumbnail(320, 180);
 
-                        PreviewImage.Visibility = Visibility.Visible;
                         PreviewMediaControls.Visibility = Visibility.Visible;
                         TxtPreviewInfo.Text = $"Vista previa: vídeo {vli.FileName}";
 
                         _lastSelectedVideoPath = vli.FilePath;
+                    }
+                    catch
+                    {
+                        PreviewImage.Visibility = Visibility.Visible;
+                        PreviewMediaControls.Visibility = Visibility.Collapsed;
+                        TxtPreviewInfo.Text = "Imagen / Video";
+                    }
+                }
+                else if (selected is AudioListItem ai)
+                {
+                    try
+                    {
+                        // Preparar para reproducir audio en preview: detener cualquier preview previo
+                        StopPreviewPlaybackAndReset();
+                        PreviewMediaControls.Visibility = Visibility.Visible;
+                        PreviewImage.Source = CreateGenericPlaceholderThumbnail(320, 90);
+                        PreviewImage.Visibility = Visibility.Visible;
+                        TxtPreviewInfo.Text = $"Vista preview: audio {ai.FileName}";
+
+                        _lastSelectedVideoPath = ai.FilePath;
+                        // Marcamos que el preview que se iniciará será audio
+                        _previewIsAudio = true;
                     }
                     catch
                     {
@@ -593,6 +634,44 @@ namespace TMRJW
                     }
                     catch { }
 
+                    return;
+                }
+
+                // Reproducir audios en doble click
+                if (selected is AudioListItem ali && !string.IsNullOrEmpty(ali.FilePath))
+                {
+                    try
+                    {
+                        // Detener cualquier reproducción previa en el preview y preparar preview para audio.
+                        StopPreviewPlaybackAndReset();
+                        PreviewMediaControls.Visibility = Visibility.Visible;
+                        TxtPreviewInfo.Text = $"Vista preview: audio {ali.FileName}";
+
+                        // Preparar fuente en PreviewMedia. No tocar la proyección: mantener la última imagen proyectada.
+                        bool isRemote = Uri.TryCreate(ali.FilePath, UriKind.Absolute, out Uri? u) && (u.Scheme=="http"||u.Scheme=="https");
+                        await Dispatcher.InvokeAsync(() => {
+                            try
+                            {
+                                // Ensure projection stops playing media (no overlapping audio/video)
+                                try { var pw = EnsureProjectionWindow(); if (pw != null && pw.IsPlayingVideo()) pw.StopVideo(); } catch { }
+
+                                // Show PreviewMedia but keep projection image intact (do not clear projected image)
+                                PreviewImage.Visibility = Visibility.Collapsed;
+                                PreviewMedia.Visibility = Visibility.Visible;
+                                PreviewMedia.Source = isRemote ? u : new Uri(ali.FilePath);
+                                PreviewMedia.LoadedBehavior = MediaState.Manual;
+                                PreviewMedia.Play();
+                                _previewIsPlaying = true;
+                                BtnPreviewPlayPause.Content = "⏸";
+                                StartPreviewTimer();
+                            }
+                            catch { }
+                        });
+
+                        // Guardar índice seleccionado para prev/next
+                        _lastSelectedVideoPath = ali.FilePath;
+                    }
+                    catch { }
                     return;
                 }
 
@@ -686,6 +765,18 @@ namespace TMRJW
             catch { }
         }
 
+        // Conectar el control de volumen del preview al MediaElement
+        private void PreviewVolumeSld_ValueChanged_Local(object? sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            try
+            {
+                var vol = (sender as Slider)?.Value ?? 75.0;
+                double level = Math.Max(0.0, Math.Min(100.0, vol)) / 100.0;
+                try { if (PreviewMedia != null) PreviewMedia.Volume = level; } catch { }
+            }
+            catch { }
+        }
+
         private void PreviewSldTimeline_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             // No actualizar desde PreviewMedia; la proyección (MainWindow/ProyeccionWindow) empujará
@@ -719,14 +810,15 @@ namespace TMRJW
         {
             try
             {
-                Dispatcher.BeginInvoke((Action)(() =>
+                // Ejecutar de forma síncrona en el hilo de la UI para evitar solapamientos
+                Dispatcher.Invoke((Action)(() =>
                 {
                     try
                     {
-                        PreviewMedia?.Stop();
+                        try { if (PreviewMedia != null) PreviewMedia.Stop(); } catch { }
                         try { PreviewMedia.Source = null; } catch { }
-                        PreviewMedia.Visibility = Visibility.Collapsed;
-                        PreviewImage.Visibility = Visibility.Visible;
+                        try { PreviewMedia.Visibility = Visibility.Collapsed; } catch { }
+                        try { PreviewImage.Visibility = Visibility.Visible; } catch { }
                         _previewIsPlaying = false;
                         try { BtnPreviewPlayPause.Content = "⏵"; } catch { }
                         try { StopPreviewTimer(); } catch { }
@@ -772,6 +864,14 @@ namespace TMRJW
             public string FilePath { get; set; } = string.Empty;
             public string FileName => Path.GetFileName(FilePath);
             public BitmapImage? Thumbnail { get; set; }
+            public override string ToString() => FileName;
+        }
+
+        // Simple model para listar audios
+        private class AudioListItem
+        {
+            public string FilePath { get; set; } = string.Empty;
+            public string FileName => Path.GetFileName(FilePath);
             public override string ToString() => FileName;
         }
 

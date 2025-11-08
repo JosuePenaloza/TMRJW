@@ -146,9 +146,9 @@
 
             <DockPanel Grid.Row="0" Margin="4" LastChildFill="True">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,8,0">
-                    <Button x:Name="BtnBack" Width="28" Height="24" Background="#FFD900" ToolTip="Atrás"
+                    <Button x:Name="BtnBack" Width="28" Height="24" ToolTip="Atrás"
                             Click="BtnBack_Click" Margin="0,0,6,0" FontSize="14" Content="◀"/>
-                    <Button x:Name="BtnForward" Width="28" Height="24" Background="#FFD900" ToolTip="Adelante"
+                    <Button x:Name="BtnForward" Width="28" Height="24" ToolTip="Adelante"
                             Click="BtnForward_Click" FontSize="14" Content="▶"/>
                 </StackPanel>
 
@@ -188,11 +188,11 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" >
-                    <!-- Reemplazado: mostrar botón de Ajustes en lugar del botón de regresar -->
-                    <Button x:Name="BtnOpenAjustesSmall" Content="⚙" Background="#1976D2" Foreground="White" Height="30" Width="36"
-                            Click="BtnOpenAjustes_Click" Margin="0,0,6,0" ToolTip="Ajustes"/>
+                    <!-- Orden: Proyección (izquierda), Ajustes (centro), Cargar archivos (derecha) -->
                     <Button x:Name="BtnProjectionPower" Content="⏻" Background="#FF8C00" Foreground="White" Height="30" Width="36"
                             Click="BtnProjectionPower_Click" Margin="0,0,6,0" FontSize="16" ToolTip="Encender/Apagar proyección"/>
+                    <Button x:Name="BtnOpenAjustesSmall" Content="⚙" Background="#1976D2" Foreground="White" Height="30" Width="36"
+                            Click="BtnOpenAjustes_Click" Margin="0,0,6,0" ToolTip="Ajustes"/>
                     <Button x:Name="BtnLoadExtra" Content="📁" Background="#8E24AA" Foreground="White" Height="30" Width="36"
                             Click="BtnLoadExtra_Click" Margin="0,0,6,0" ToolTip="Cargar imágenes / vídeos"/>
                 </StackPanel>

@@ -2,5 +2,6 @@
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
   </Folder>
+  <Project Path="BenchmarkSuite1/BenchmarkSuite1.csproj" />
   <Project Path="TMRJW/TMRJW.csproj" />
 </Solution>

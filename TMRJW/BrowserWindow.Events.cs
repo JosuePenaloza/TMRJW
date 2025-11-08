@@ -218,7 +218,8 @@ namespace TMRJW
             var dlg = new OpenFileDialog
             {
                 Multiselect = true,
-                Filter = "Imágenes y Vídeos|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.mp4;*.wmv;*.avi|Imágenes|*.jpg;*.jpeg;*.png;*.bmp;*.gif|Vídeos|*.mp4;*.wmv;*.avi|Todos los archivos|*.*"
+                // Incluir audios en el filtro para que puedan ser seleccionados con el mismo diálogo
+                Filter = "Imágenes, Vídeos y Audios|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.mp4;*.wmv;*.avi;*.mp3;*.wav;*.ogg|Imágenes|*.jpg;*.jpeg;*.png;*.bmp;*.gif|Vídeos|*.mp4;*.wmv;*.avi|Audios|*.mp3;*.wav;*.ogg|Todos los archivos|*.*"
             };
 
             if (dlg.ShowDialog() != true) return;
@@ -228,11 +229,14 @@ namespace TMRJW
             // Usar clave con prefijo 'Carpeta:' para que EnsureTabExists trate la pestaña como lista vertical
             string imagesTabKey = "Carpeta: Imágenes Cargadas";
             string imagesTabHeader = "Imágenes Cargadas";
-            string videosTabKey = "Videos: Extras"; // mantiene prefijo 'Videos:' para plantilla de vídeo
+            string videosTabKey = "Videos: Extras";
             string videosTabHeader = "Videos Extras";
+            string audiosTabKey = "Audios: Extras";
+            string audiosTabHeader = "Audios Extras";
 
             EnsureTabExists(imagesTabKey, imagesTabHeader);
             EnsureTabExists(videosTabKey, videosTabHeader);
+            EnsureTabExists(audiosTabKey, audiosTabHeader);
 
             foreach (var f in dlg.FileNames)
             {
@@ -248,6 +252,13 @@ namespace TMRJW
                     {
                         // Vídeos: añadir a la pestaña de Vídeos de esta carpeta. NO añadir a 'Todas' (addToAll=false)
                         AddImageToTab(videosTabKey, f, videosTabHeader, addToAll: false);
+                    }
+                    else if (ext.Equals(".mp3", StringComparison.OrdinalIgnoreCase) ||
+                             ext.Equals(".wav", StringComparison.OrdinalIgnoreCase) ||
+                             ext.Equals(".ogg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Audios: añadir a la pestaña de Audios (no añadir a 'Todas')
+                        AddImageToTab(audiosTabKey, f, audiosTabHeader, addToAll: false);
                     }
                     else
                     {
@@ -333,10 +344,10 @@ namespace TMRJW
         {
             try
             {
-                var ajustes = new AjustesWindow { Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-                ajustes.ShowDialog();
-                // después de cerrar ajustes, recargar monitores en caso de que se cambiara selección
-                try { PopulateMonitorsAfterSettingsChange(); } catch { }
+                // Abrir ajustes como ventana modeless y sin Owner para evitar que su ciclo de vida
+                // afecte a la ventana de proyección.
+                var ajustes = new AjustesWindow { WindowStartupLocation = WindowStartupLocation.CenterScreen };
+                ajustes.Show();
             }
             catch { }
         }
@@ -345,9 +356,39 @@ namespace TMRJW
         {
             try
             {
-                // Recrear/actualizar ventana de proyección según nuevos ajustes
-                try { if (_localProyeccionWindow != null) { _localProyeccionWindow.Close(); _localProyeccionWindow = null; } } catch { }
-                try { EnsureProjectionWindow(); } catch { }
+                // Intentar reposicionar la ventana de proyección existente según los ajustes
+                try
+                {
+                    var settings = SettingsHelper.Load();
+                    var selectedDevice = settings.SelectedMonitorDeviceName;
+                    var monitors = PlatformInterop.GetMonitorsNative();
+                    PlatformInterop.MonitorInfo? target = null;
+
+                    if (!string.IsNullOrEmpty(selectedDevice))
+                        target = monitors.Find(m => string.Equals(m.DeviceName, selectedDevice, StringComparison.OrdinalIgnoreCase));
+
+                    if (target == null)
+                        target = monitors.Find(m => !m.IsPrimary);
+                    if (target == null)
+                        target = monitors.Find(m => m.IsPrimary) ?? (monitors.Count > 0 ? monitors[0] : null);
+
+                    if (target != null && _localProyeccionWindow != null)
+                    {
+                        try
+                        {
+                            var helper = new System.Windows.Interop.WindowInteropHelper(_localProyeccionWindow);
+                            IntPtr hWnd = helper.Handle;
+                            if (hWnd != IntPtr.Zero)
+                            {
+                                const uint SWP_SHOWWINDOW = 0x0040;
+                                IntPtr HWND_TOPMOST = new IntPtr(-1);
+                                SetWindowPos(hWnd, HWND_TOPMOST, target.X, target.Y, target.Width, target.Height, SWP_SHOWWINDOW);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
             }
             catch { }
         }
@@ -417,35 +458,91 @@ namespace TMRJW
         {
             try
             {
-                // Controlar la reproducción en la ProyeccionWindow directamente
+                // Si el preview local está activo (MediaElement visible y con Source), controlar reproducción local
                 try
                 {
+                    if (PreviewMedia != null && PreviewMedia.Visibility == Visibility.Visible && PreviewMedia.Source != null)
+                    {
+                        if (_previewIsPlaying)
+                        {
+                            PreviewMedia.Pause();
+                            _previewIsPlaying = false;
+                            BtnPreviewPlayPause.Content = "⏵";
+                            StopPreviewTimer();
+                            // If the preview was audio, keep the flag until user stops completely
+                            if (_previewIsAudio)
+                            {
+                                // keep _previewIsAudio true until Stop is pressed
+                            }
+                        }
+                        else
+                        {
+                            PreviewMedia.Play();
+                            _previewIsPlaying = true;
+                            BtnPreviewPlayPause.Content = "⏸";
+                            StartPreviewTimer();
+                            if (_previewIsAudio) { /* audio playing */ }
+                        }
+                        return;
+                    }
+                }
+                catch { }
+
+                // Si no hay preview local, delegar al controlador de proyección (vídeo)
+                try
+                {
+                    // Si la última ruta seleccionada es un audio, reproducirlo en el preview en lugar de enviarlo a la proyección
+                    if (!string.IsNullOrWhiteSpace(_lastSelectedVideoPath))
+                    {
+                        var ext = Path.GetExtension(_lastSelectedVideoPath) ?? string.Empty;
+                        ext = ext.ToLowerInvariant();
+                        var audioExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".ogg", ".m4a", ".flac" };
+                        if (audioExts.Contains(ext))
+                        {
+                            // start preview audio (reuse the same flow as double-click)
+                            try
+                            {
+                                StopPreviewPlaybackAndReset();
+                                PreviewMediaControls.Visibility = Visibility.Visible;
+                                TxtPreviewInfo.Text = $"Vista preview: audio {Path.GetFileName(_lastSelectedVideoPath)}";
+                                bool isRemote = Uri.TryCreate(_lastSelectedVideoPath, UriKind.Absolute, out Uri? u) && (u.Scheme=="http"||u.Scheme=="https");
+                                await Dispatcher.InvokeAsync(() => {
+                                    try
+                                    {
+                                        PreviewImage.Visibility = Visibility.Collapsed;
+                                        PreviewMedia.Visibility = Visibility.Visible;
+                                        PreviewMedia.Source = isRemote ? u : new Uri(_lastSelectedVideoPath);
+                                        PreviewMedia.LoadedBehavior = MediaState.Manual;
+                                        PreviewMedia.Play();
+                                        _previewIsPlaying = true;
+                                        _previewIsAudio = true;
+                                        BtnPreviewPlayPause.Content = "⏸";
+                                        StartPreviewTimer();
+                                    }
+                                    catch { }
+                                });
+                            }
+                            catch { }
+                            return;
+                        }
+                    }
+
                     var pw = EnsureProjectionWindow();
                     if (pw == null) return;
 
-                    // Try to resume if paused
-                    try
-                    {
-                        if (pw.TryResume()) { BtnPreviewPlayPause.Content = "⏸"; return; }
-                    }
-                    catch { }
+                    try { if (pw.TryResume()) { BtnPreviewPlayPause.Content = "⏸"; return; } } catch { }
 
                     if (pw.IsPlayingVideo())
                     {
                         pw.PauseVideo();
                         BtnPreviewPlayPause.Content = "⏵";
-                        return;
                     }
                     else
                     {
                         if (string.IsNullOrWhiteSpace(_lastSelectedVideoPath)) return;
-                        // Pedir que BrowserWindow libere su preview
                         try { StopPreviewPlaybackAndReset(); } catch { }
-
-                        // Copiar a temporal para evitar locks
                         string? temp = null;
                         try { temp = await CopyMediaToTempAsync(_lastSelectedVideoPath, forProjection: true).ConfigureAwait(false); } catch { }
-
                         if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
                         else
                         {
@@ -453,7 +550,6 @@ namespace TMRJW
                             else pw.PlayVideo(_lastSelectedVideoPath);
                         }
                         BtnPreviewPlayPause.Content = "⏸";
-                        return;
                     }
                 }
                 catch { }
@@ -467,11 +563,61 @@ namespace TMRJW
             {
                 try
                 {
+                    // Si hay reproducción en preview local, pararla
+                    try
+                    {
+                        if (PreviewMedia != null && PreviewMedia.Visibility == Visibility.Visible)
+                        {
+                            PreviewMedia.Stop();
+                            try { PreviewMedia.Source = null; } catch { }
+                            PreviewMedia.Visibility = Visibility.Collapsed;
+                            PreviewImage.Visibility = Visibility.Visible;
+                            // cleared preview; reset audio flag
+                            _previewIsAudio = false;
+                        }
+                    }
+                    catch { }
+
                     var pw = EnsureProjectionWindow();
                     if (pw != null) pw.StopVideo();
                     BtnPreviewPlayPause.Content = "⏵";
                 }
                 catch { }
+            }
+            catch { }
+        }
+
+        private void BtnPreviewPrev_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var lb = ImagesListBox;
+                if (lb == null) return;
+                int idx = lb.SelectedIndex;
+                if (idx > 0)
+                {
+                    lb.SelectedIndex = idx - 1;
+                    lb.ScrollIntoView(lb.SelectedItem);
+                    // Si es audio, reproducirlo
+                    if (lb.SelectedItem is AudioListItem) ImagesListBox_MouseDoubleClick(lb, null);
+                }
+            }
+            catch { }
+        }
+
+        private void BtnPreviewNext_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var lb = ImagesListBox;
+                if (lb == null) return;
+                int idx = lb.SelectedIndex;
+                if (idx < lb.Items.Count - 1)
+                {
+                    lb.SelectedIndex = idx + 1;
+                    lb.ScrollIntoView(lb.SelectedItem);
+                    if (lb.SelectedItem is AudioListItem) ImagesListBox_MouseDoubleClick(lb, null);
+                }
             }
             catch { }
         }

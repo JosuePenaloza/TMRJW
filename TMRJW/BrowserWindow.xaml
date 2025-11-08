@@ -78,8 +78,14 @@
         <!-- Plantilla específica para elementos de vídeo en listas verticales -->
         <DataTemplate x:Key="VideoItemTemplate">
             <Border Margin="4" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1" Padding="6" Height="100">
-                <DockPanel>
-                    <Image Width="160" Height="90" Stretch="UniformToFill" DockPanel.Dock="Left" Margin="0,0,8,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="40" />
+                    </Grid.ColumnDefinitions>
+
+                    <Image Grid.Column="0" Width="120" Height="80" Stretch="UniformToFill" Margin="0,0,8,0">
                         <Image.Source>
                             <PriorityBinding>
                                 <Binding Path="Thumbnail" />
@@ -88,12 +94,38 @@
                             </PriorityBinding>
                         </Image.Source>
                     </Image>
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Path=FileName}" FontWeight="Bold" />
-                        <TextBlock Text="{Binding Path=FilePath}" FontSize="11" Foreground="#666" TextTrimming="CharacterEllipsis" Width="200" />
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="🎬" FontSize="20" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding Path=FileName}" FontWeight="Bold" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <!-- file path intentionally hidden to save space -->
                     </StackPanel>
-                    <Button Content="🗑" Width="30" Height="30" VerticalAlignment="Top" HorizontalAlignment="Right" DockPanel.Dock="Right" Click="BtnDeleteImage_Click" DataContext="{Binding}"/>
-                </DockPanel>
+
+                    <Button Grid.Column="2" Content="🗑" Width="30" Height="30" VerticalAlignment="Top" HorizontalAlignment="Right" Click="BtnDeleteImage_Click" DataContext="{Binding}"/>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- Plantilla específica para elementos de audio en listas verticales (responsive al contenedor) -->
+        <DataTemplate x:Key="AudioItemTemplate">
+            <Border Margin="4" Background="White" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1" Padding="6" Height="80" HorizontalAlignment="Stretch">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40" /> <!-- icon -->
+                        <ColumnDefinition Width="*" />  <!-- título flexible -->
+                        <ColumnDefinition Width="Auto" /> <!-- botón eliminar alineado a la derecha -->
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="🎵" FontSize="22" VerticalAlignment="Center" HorizontalAlignment="Center" />
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Stretch">
+                        <TextBlock Text="{Binding Path=FileName}" FontWeight="Bold" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Button Grid.Column="2" Content="🗑" Width="30" Height="30" VerticalAlignment="Center" HorizontalAlignment="Right" Click="BtnDeleteImage_Click" DataContext="{Binding}"/>
+                </Grid>
             </Border>
         </DataTemplate>
 
@@ -127,7 +159,7 @@
                     <Button x:Name="BtnGo" Content="Ir" Width="44" Height="24" Margin="0,0,6,0" Click="BtnGo_Click"/>
                     <Button x:Name="BtnLoadEpubNav" Content="📚 EPUB" Width="74" Height="24" Margin="0,0,6,0" Click="BtnLoadEpubNav_Click" ToolTip="Cargar EPUB y crear pestaña con sus imágenes" />
                     <Button x:Name="BtnRefresh" Content="Actualizar" Background="#FF4D4D" Foreground="White" Width="80" Height="28" Click="BtnRefreshImages_Click" Margin="0,0,6,0" Visibility="Collapsed"/>
-                    <Button x:Name="BtnOpenAjustes" Content="⚙" Background="#1976D2" Foreground="White" Width="36" Height="28" Margin="6,0,0,0" Click="BtnOpenAjustes_Click" ToolTip="Ajustes" />
+                    <!-- <Button x:Name="BtnOpenAjustes" Content="⚙" Background="#1976D2" Foreground="White" Width="36" Height="28" Margin="6,0,0,0" Click="BtnOpenAjustes_Click" ToolTip="Ajustes" /> -->
                     <!-- Indicador pequeño mientras se analizan/descargan imágenes -->
                     <ProgressBar x:Name="CaptureIndicator" Width="18" Height="18" Margin="6,5,0,0" IsIndeterminate="True" Visibility="Collapsed" />
                 </StackPanel>
@@ -156,8 +188,9 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" >
-                    <Button x:Name="BtnReturnToMain" Content="🏠" Background="#2196F3" Foreground="White" Height="30" Width="36"
-                            Click="BtnReturnToMain_Click" Margin="0,0,6,0" ToolTip="Regresar a control"/>
+                    <!-- Reemplazado: mostrar botón de Ajustes en lugar del botón de regresar -->
+                    <Button x:Name="BtnOpenAjustesSmall" Content="⚙" Background="#1976D2" Foreground="White" Height="30" Width="36"
+                            Click="BtnOpenAjustes_Click" Margin="0,0,6,0" ToolTip="Ajustes"/>
                     <Button x:Name="BtnProjectionPower" Content="⏻" Background="#FF8C00" Foreground="White" Height="30" Width="36"
                             Click="BtnProjectionPower_Click" Margin="0,0,6,0" FontSize="16" ToolTip="Encender/Apagar proyección"/>
                     <Button x:Name="BtnLoadExtra" Content="📁" Background="#8E24AA" Foreground="White" Height="30" Width="36"
@@ -185,11 +218,16 @@
                     </Grid>
 
                     <StackPanel Grid.Row="1" Orientation="Vertical" HorizontalAlignment="Stretch" Margin="0,8,0,0">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                            <TextBlock x:Name="TxtPreviewInfo" Text="Imagen / Video" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                            <StackPanel Orientation="Horizontal" x:Name="PreviewMediaControls" Visibility="Collapsed">
+                        <!-- Nombre del elemento (arriba) -->
+                        <TextBlock x:Name="TxtPreviewInfo" Text="Imagen / Video" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,6" />
+
+                        <!-- Multimedia buttons: directly under the name, left-aligned -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
+                            <StackPanel Orientation="Horizontal" x:Name="PreviewMediaControls" Visibility="Collapsed" HorizontalAlignment="Left">
+                                <Button x:Name="BtnPreviewPrev" Content="⏮" Width="36" Height="28" Click="BtnPreviewPrev_Click" Margin="0,0,6,0" ToolTip="Anterior"/>
                                 <Button x:Name="BtnPreviewPlayPause" Content="⏵" Width="36" Height="28" Click="BtnPreviewPlayPause_Click" Margin="0,0,6,0"/>
-                                <Button x:Name="BtnPreviewStop" Content="⏹" Width="36" Height="28" Click="BtnPreviewStop_Click" />
+                                <Button x:Name="BtnPreviewStop" Content="⏹" Width="36" Height="28" Click="BtnPreviewStop_Click" Margin="0,0,6,0"/>
+                                <Button x:Name="BtnPreviewNext" Content="⏭" Width="36" Height="28" Click="BtnPreviewNext_Click" Margin="0,0,6,0" ToolTip="Siguiente"/>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
                                     <TextBlock Text="Vol" VerticalAlignment="Center" Margin="6,0,4,0" />
                                     <Slider x:Name="PreviewVolumeSld" Width="90" Minimum="0" Maximum="100" ValueChanged="PreviewVolumeSld_ValueChanged" Value="75" />
@@ -197,7 +235,8 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center" HorizontalAlignment="Stretch">
+                        <!-- Timeline debajo de los botones -->
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0" VerticalAlignment="Center" HorizontalAlignment="Stretch">
                             <Slider x:Name="PreviewSldTimeline" Minimum="0" Maximum="1" Value="0" Width="220" Margin="0,0,8,0" PreviewMouseDown="PreviewSldTimeline_PreviewMouseDown" PreviewMouseUp="PreviewSldTimeline_PreviewMouseUp" ValueChanged="PreviewSldTimeline_ValueChanged" />
                             <TextBlock x:Name="TxtPreviewCurrentTime" Text="00:00:00" VerticalAlignment="Center" Margin="0,0,6,0"/>
                             <TextBlock x:Name="TxtPreviewTotalTime" Text="/00:00:00" VerticalAlignment="Center" />

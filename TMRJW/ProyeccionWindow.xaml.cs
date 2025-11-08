@@ -304,6 +304,33 @@ namespace TMRJW
                 {
                     try
                     {
+                        // Stop any preview audio in BrowserWindow instances to avoid audio overlap.
+                        // Use reflection to invoke StopPreviewPlaybackAndReset if present (may be non-public) so we don't create a hard dependency.
+                        try
+                        {
+                            foreach (Window w in Application.Current.Windows)
+                            {
+                                try
+                                {
+                                    var t = w.GetType();
+                                    var mi = t.GetMethod("StopPreviewPlaybackAndReset", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                                    if (mi != null)
+                                    {
+                                        try
+                                        {
+                                            if (w.Dispatcher != null)
+                                                w.Dispatcher.Invoke(() => { try { mi.Invoke(w, null); } catch { } });
+                                            else
+                                                mi.Invoke(w, null);
+                                        }
+                                        catch { }
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                        catch { }
+
                         // If same video is loaded and currently paused, resume instead of reloading
                         if (!string.IsNullOrWhiteSpace(_currentVideoPath) && string.Equals(_currentVideoPath, filePath, StringComparison.OrdinalIgnoreCase)
  && ProjectionMedia.Source != null && !_isPlayingVideo)

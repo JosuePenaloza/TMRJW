@@ -14,6 +14,11 @@ namespace TMRJW
 {
     public partial class BrowserWindow
     {
+        // Shuffle state
+        private bool _isShuffleMode = false;
+        private List<int>? _shuffleOrder = null;
+        private int _shufflePos = 0;
+
         private bool _projectionPowerOn = false;
         private const double ZoomStep = 0.2;
 
@@ -868,5 +873,52 @@ namespace TMRJW
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             return Path.Combine(local, "TMRJW", "cache");
         }
+
+        private void BtnShuffle_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                _isShuffleMode = !_isShuffleMode;
+                var btn = sender as System.Windows.Controls.Button;
+                if (btn != null) btn.Content = _isShuffleMode ? "🔁" : "🔀";
+
+                if (_isShuffleMode)
+                {
+                    PlayNextShuffleAudio();
+                }
+            }
+            catch { }
+        }
+
+        private void PlayNextShuffleAudio()
+        {
+            try
+            {
+                var lb = ImagesListBox;
+                if (lb == null) return;
+
+                var audioIndices = lb.Items.Cast<object>().Select((it, idx) => new { it, idx })
+                    .Where(x => x.it is AudioListItem).Select(x => x.idx).ToList();
+                if (!audioIndices.Any()) return;
+
+                if (_shuffleOrder == null || _shuffleOrder.Count != audioIndices.Count)
+                {
+                    var rnd = new Random();
+                    _shuffleOrder = audioIndices.OrderBy(x => rnd.Next()).ToList();
+                    _shufflePos = 0;
+                }
+
+                if (_shufflePos >= _shuffleOrder.Count) _shufflePos = 0;
+
+                int realIdx = _shuffleOrder[_shufflePos];
+                _shufflePos++;
+
+                lb.SelectedIndex = realIdx;
+                lb.ScrollIntoView(lb.SelectedItem);
+                if (lb.SelectedItem is AudioListItem) ImagesListBox_MouseDoubleClick(lb, null);
+            }
+            catch { }
+        }
+
     }
 }

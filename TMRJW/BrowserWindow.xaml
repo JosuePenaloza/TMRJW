@@ -228,6 +228,7 @@
                                 <Button x:Name="BtnPreviewPlayPause" Content="⏵" Width="36" Height="28" Click="BtnPreviewPlayPause_Click" Margin="0,0,6,0"/>
                                 <Button x:Name="BtnPreviewStop" Content="⏹" Width="36" Height="28" Click="BtnPreviewStop_Click" Margin="0,0,6,0"/>
                                 <Button x:Name="BtnPreviewNext" Content="⏭" Width="36" Height="28" Click="BtnPreviewNext_Click" Margin="0,0,6,0" ToolTip="Siguiente"/>
+                                <Button x:Name="BtnShuffle" Content="🔀" Width="36" Height="28" Click="BtnShuffle_Click" Margin="0,0,6,0" ToolTip="Reproducción aleatoria"/>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
                                     <TextBlock Text="Vol" VerticalAlignment="Center" Margin="6,0,4,0" />
                                     <Slider x:Name="PreviewVolumeSld" Width="90" Minimum="0" Maximum="100" ValueChanged="PreviewVolumeSld_ValueChanged" Value="75" />

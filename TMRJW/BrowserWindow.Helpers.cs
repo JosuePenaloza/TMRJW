@@ -8,6 +8,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.Threading;
 
 namespace TMRJW
 {
@@ -585,6 +587,7 @@ namespace TMRJW
                     // si es ruta de vídeo o URL, notificar para que MainWindow reproduzca en proyección
                     if (_onVideoSelected != null)
                     {
+                        try { StopPreviewPlaybackAndReset(); } catch { }
                         try { _onVideoSelected.Invoke(s); } catch { }
                         return;
                     }
@@ -597,6 +600,8 @@ namespace TMRJW
                             try
                             {
                                 var pw = EnsureProjectionWindow();
+                                // Ensure preview audio is stopped before playing projection video
+                                try { StopPreviewPlaybackAndReset(); } catch { }
                                 if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
                                 else
                                 {
@@ -615,6 +620,7 @@ namespace TMRJW
                 {
                     if (_onVideoSelected != null)
                     {
+                        try { StopPreviewPlaybackAndReset(); } catch { }
                         try { _onVideoSelected.Invoke(vli.FilePath); } catch { }
                         return;
                     }
@@ -626,6 +632,7 @@ namespace TMRJW
                             try
                             {
                                 var pw = EnsureProjectionWindow();
+                                try { StopPreviewPlaybackAndReset(); } catch { }
                                 if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
                                 else pw.PlayVideo(vli.FilePath);
                             }

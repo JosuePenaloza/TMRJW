@@ -86,7 +86,22 @@ namespace TMRJW
 
                 PreviewMedia.MediaEnded += (s, e) =>
                 {
-                    try { StopPreviewPlaybackAndReset(); } catch { }
+                    try
+                    {
+                        // If shuffle mode active, play next audio; otherwise reset preview
+                        try
+                        {
+                            if (_isShuffleMode)
+                            {
+                                // defer to Events partial which implements PlayNextShuffleAudio
+                                try { PlayNextShuffleAudio(); return; } catch { }
+                            }
+                        }
+                        catch { }
+
+                        StopPreviewPlaybackAndReset();
+                    }
+                    catch { }
                 };
             }
             catch { }

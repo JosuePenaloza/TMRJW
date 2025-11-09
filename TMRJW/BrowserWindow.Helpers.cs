@@ -257,8 +257,8 @@ namespace TMRJW
                             try { PreviewMedia.Source = new Uri(pathOrUrl); } catch { PreviewMedia.Source = null; }
                         }
 
-                        // mostrar controles
-                        PreviewMediaControls.Visibility = Visibility.Visible;
+                        // mostrar controles (si no estamos en la pestaña Videos Extras)
+                        try { PreviewMediaControls.Visibility = _videosExtrasActive ? Visibility.Collapsed : Visibility.Visible; } catch { }
 
                         // iniciar reproducción automática
                         try { PreviewMedia.Play(); _previewIsPlaying = true; BtnPreviewPlayPause.Content = "⏸"; StartPreviewTimer(); } catch { }
@@ -479,7 +479,12 @@ namespace TMRJW
 
                             // Si hay audio en preview no forzar la visibilidad del media; aun así mostramos controles
                             if (!(_previewIsPlaying && _previewIsAudio)) PreviewImage.Visibility = Visibility.Visible;
-                            PreviewMediaControls.Visibility = Visibility.Visible; // mantener botones visibles
+                            // Determinar si es audio por extensión
+                            var ext2 = Path.GetExtension(s) ?? string.Empty;
+                            var audioExts2 = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".ogg", ".m4a", ".flac" };
+                            bool isAudio2 = audioExts2.Contains(ext2);
+                            // Mostrar controles de preview solo para audios y sólo si no estamos en Videos Extras
+                            try { PreviewMediaControls.Visibility = (! _videosExtrasActive && isAudio2) ? Visibility.Visible : Visibility.Collapsed; } catch { }
                             TxtPreviewInfo.Text = isLocalFile ? $"Vista preview: vídeo {Path.GetFileName(s)}" : $"Vista preview: vídeo {u?.Host}";
 
                             // Guardar ruta para que los botones del preview invoquen la reproducción en la proyección
@@ -525,7 +530,8 @@ namespace TMRJW
                         if (vli.Thumbnail != null) PreviewImage.Source = vli.Thumbnail;
                         else PreviewImage.Source = CreateGenericPlaceholderThumbnail(320, 180);
 
-                        PreviewMediaControls.Visibility = Visibility.Visible;
+                        // Para vídeos ocultamos los controles de preview (estos controles son solo para audio)
+                        PreviewMediaControls.Visibility = Visibility.Collapsed;
                         TxtPreviewInfo.Text = $"Vista previa: vídeo {vli.FileName}";
 
                         _lastSelectedVideoPath = vli.FilePath;
@@ -541,15 +547,14 @@ namespace TMRJW
                 {
                     try
                     {
-                        // Preparar para reproducir audio en preview: detener cualquier preview previo
-                        StopPreviewPlaybackAndReset();
-                        PreviewMediaControls.Visibility = Visibility.Visible;
-                        PreviewImage.Source = CreateGenericPlaceholderThumbnail(320, 90);
-                        PreviewImage.Visibility = Visibility.Visible;
+                        // Al seleccionar con un click un audio NO debemos detener/reemplazar el audio que ya se esté reproduciendo.
+                        // Solo actualizamos la UI y la ruta seleccionada; la reproducción real se inicia con doble-click.
+                        // Mostrar controles de preview solo si no estamos en Videos Extras (pero no iniciar/stoppear reproducción)
+                        try { PreviewMediaControls.Visibility = _videosExtrasActive ? Visibility.Collapsed : Visibility.Visible; } catch { }
                         TxtPreviewInfo.Text = $"Vista preview: audio {ai.FileName}";
 
                         _lastSelectedVideoPath = ai.FilePath;
-                        // Marcamos que el preview que se iniciará será audio
+                        // Marcamos que el preview se refiere a audio (pero no forzamos detener/arrancar)
                         _previewIsAudio = true;
                     }
                     catch
@@ -651,7 +656,8 @@ namespace TMRJW
                     {
                         // Detener cualquier reproducción previa en el preview y preparar preview para audio.
                         StopPreviewPlaybackAndReset();
-                        PreviewMediaControls.Visibility = Visibility.Visible;
+                        // Mostrar controles de preview sólo si no estamos en Videos Extras
+                        try { PreviewMediaControls.Visibility = _videosExtrasActive ? Visibility.Collapsed : Visibility.Visible; } catch { }
                         TxtPreviewInfo.Text = $"Vista preview: audio {ali.FileName}";
 
                         // Preparar fuente en PreviewMedia. No tocar la proyección: mantener la última imagen proyectada.
@@ -756,16 +762,15 @@ namespace TMRJW
             _isPreviewDragging = false;
             try
             {
-                // Al soltar el slider en el preview solicitamos a la proyección que haga seek
+                // Al soltar el slider en el preview, hacer seek en el PreviewMedia (audio)
                 try
                 {
-                    // Al soltar el slider en el preview solicitamos a la proyección que haga seek
-                    try
+                    if (PreviewMedia != null && PreviewMedia.NaturalDuration.HasTimeSpan)
                     {
-                        var pw = EnsureProjectionWindow();
-                        if (pw != null) pw.SeekToFraction(PreviewSldTimeline.Value);
+                        var dur = PreviewMedia.NaturalDuration.TimeSpan;
+                        var pos = TimeSpan.FromSeconds(Math.Max(0.0, Math.Min(1.0, PreviewSldTimeline.Value)) * dur.TotalSeconds);
+                        try { PreviewMedia.Position = pos; } catch { }
                     }
-                    catch { }
                 }
                 catch { }
             }
@@ -790,22 +795,15 @@ namespace TMRJW
             // los valores a este slider. Si el usuario está arrastrando, el Value cambiará localmente.
             if (_isPreviewDragging)
             {
-                // opcional: actualizar texto localmente si conocemos duración desde la proyección
                 try
                 {
-                    // intentar obtener duración desde la proyección
-                    try
+                    if (PreviewMedia != null && PreviewMedia.NaturalDuration.HasTimeSpan)
                     {
-                        var pw = EnsureProjectionWindow();
-                        var dur = pw?.GetVideoDuration();
-                        if (dur.HasValue)
-                        {
-                            var pos = TimeSpan.FromSeconds(PreviewSldTimeline.Value * dur.Value.TotalSeconds);
-                            TxtPreviewCurrentTime.Text = pos.ToString(@"hh\:mm\:ss");
-                            TxtPreviewTotalTime.Text = "/" + dur.Value.ToString(@"hh\:mm\:ss");
-                        }
+                        var dur = PreviewMedia.NaturalDuration.TimeSpan;
+                        var pos = TimeSpan.FromSeconds(Math.Max(0.0, Math.Min(1.0, PreviewSldTimeline.Value)) * dur.TotalSeconds);
+                        TxtPreviewCurrentTime.Text = pos.ToString(@"hh\:mm\:ss");
+                        TxtPreviewTotalTime.Text = "/" + dur.ToString(@"hh\:mm\:ss");
                     }
-                    catch { }
                 }
                 catch { }
             }
@@ -847,16 +845,17 @@ namespace TMRJW
                 {
                     try
                     {
+                        // Esta llamada proviene de la proyección: actualizar los controles exclusivos de vídeo
                         if (duration.HasValue && duration.Value.TotalSeconds > 0)
                         {
                             double frac = Math.Max(0.0, Math.Min(1.0, position.TotalSeconds / duration.Value.TotalSeconds));
-                            try { PreviewSldTimeline.Value = frac; } catch { }
-                            try { TxtPreviewCurrentTime.Text = position.ToString(@"hh\:mm\:ss"); } catch { }
-                            try { TxtPreviewTotalTime.Text = "/" + duration.Value.ToString(@"hh\:mm\:ss"); } catch { }
+                            try { VideosSldTimeline.Value = frac; } catch { }
+                            try { TxtVideosCurrentTime.Text = position.ToString(@"hh\:mm\:ss"); } catch { }
+                            try { TxtVideosTotalTime.Text = "/" + duration.Value.ToString(@"hh\:mm\:ss"); } catch { }
                         }
                         else
                         {
-                            try { TxtPreviewCurrentTime.Text = position.ToString(@"hh\:mm\:ss"); } catch { }
+                            try { TxtVideosCurrentTime.Text = position.ToString(@"hh\:mm\:ss"); } catch { }
                         }
                     }
                     catch { }

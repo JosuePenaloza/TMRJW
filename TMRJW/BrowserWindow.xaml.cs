@@ -235,6 +235,9 @@ namespace TMRJW
                 lb.MouseDoubleClick += ImagesListBox_MouseDoubleClick;
                 lb.KeyDown += ImagesListBox_KeyDown;
 
+                // Cuando cambie la selección de pestañas, actualizar visibilidad de controles exclusivos
+                InventoryTabs.SelectionChanged += (ss, ee) => { try { UpdateVideosExtrasControlsVisibility(); } catch { } };
+
                 tab.Content = new Border { Background = System.Windows.Media.Brushes.Transparent, Child = lb };
                 InventoryTabs.Items.Add(tab);
             });

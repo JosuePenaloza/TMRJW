@@ -218,6 +218,22 @@
                     </Grid>
 
                     <StackPanel Grid.Row="1" Orientation="Vertical" HorizontalAlignment="Stretch" Margin="0,8,0,0">
+                        <!-- Controles exclusivos para la sección 'Videos Extras' (ubicados encima del nombre/info del elemento) -->
+                        <StackPanel x:Name="VideosExtrasControlsPanel" Orientation="Vertical" Visibility="Collapsed" Margin="0,0,0,6" HorizontalAlignment="Left">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                <Button x:Name="BtnVideosPlayPause" Content="⏵" Width="44" Height="28" Click="BtnVideosPlayPause_Click" Margin="0,0,6,0" ToolTip="Reproducir/Pausar vídeo seleccionado (Videos Extras)" Background="#2E7D32" Foreground="White" />
+                                <Button x:Name="BtnVideosStop" Content="⏹" Width="44" Height="28" Click="BtnVideosStop_Click" Margin="0,0,6,0" ToolTip="Detener reproducción en proyección" Background="#B71C1C" Foreground="White" />
+                                <TextBlock Text="" Width="12" />
+                                <TextBlock Text="Vol" VerticalAlignment="Center" Margin="6,0,4,0" />
+                                <Slider x:Name="VideosVolumeSld" Width="120" Minimum="0" Maximum="100" ValueChanged="VideosVolumeSld_ValueChanged" Value="75" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+                                <Slider x:Name="VideosSldTimeline" Minimum="0" Maximum="1" Value="0" Width="260" PreviewMouseDown="VideosSldTimeline_PreviewMouseDown" PreviewMouseUp="VideosSldTimeline_PreviewMouseUp" ValueChanged="VideosSldTimeline_ValueChanged" />
+                                <TextBlock x:Name="TxtVideosCurrentTime" Text="00:00:00" VerticalAlignment="Center" Margin="6,0,6,0" />
+                                <TextBlock x:Name="TxtVideosTotalTime" Text="/00:00:00" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+
                         <!-- Nombre del elemento (arriba) -->
                         <TextBlock x:Name="TxtPreviewInfo" Text="Imagen / Video" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,6" />
 
@@ -237,7 +253,7 @@
                         </StackPanel>
 
                         <!-- Timeline debajo de los botones -->
-                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0" VerticalAlignment="Center" HorizontalAlignment="Stretch">
+                        <StackPanel x:Name="PreviewTimelinePanel" Orientation="Horizontal" Margin="0,4,0,0" VerticalAlignment="Center" HorizontalAlignment="Stretch" Visibility="Collapsed">
                             <Slider x:Name="PreviewSldTimeline" Minimum="0" Maximum="1" Value="0" Width="220" Margin="0,0,8,0" PreviewMouseDown="PreviewSldTimeline_PreviewMouseDown" PreviewMouseUp="PreviewSldTimeline_PreviewMouseUp" ValueChanged="PreviewSldTimeline_ValueChanged" />
                             <TextBlock x:Name="TxtPreviewCurrentTime" Text="00:00:00" VerticalAlignment="Center" Margin="0,0,6,0"/>
                             <TextBlock x:Name="TxtPreviewTotalTime" Text="/00:00:00" VerticalAlignment="Center" />

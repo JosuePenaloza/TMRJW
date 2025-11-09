@@ -11,6 +11,7 @@ namespace TMRJW
             public string? SelectedMonitorDeviceName { get; set; }
             public string? ImagenTextoAnio { get; set; }
             public string? FfmpegPath { get; set; }
+            public bool IsDarkTheme { get; set; } = true;
         }
 
         private static string GetPath()

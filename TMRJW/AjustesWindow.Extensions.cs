@@ -57,7 +57,7 @@ namespace TMRJW
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error al listar monitores: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                try { AlertHelper.ShowSilentInfo(this, $"Error al listar monitores: {ex.Message}", "Error"); } catch { }
             }
         }
 
@@ -70,12 +70,12 @@ namespace TMRJW
 
                 if (!Directory.Exists(cacheDir))
                 {
-                    MessageBox.Show("No se encontró carpeta de caché.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AlertHelper.ShowSilentInfo(this, "No se encontró carpeta de caché.", "Información");
                     return;
                 }
 
-                var result = MessageBox.Show("¿Deseas eliminar todos los archivos de la caché de imágenes?\nEsta acción no se puede deshacer.", "Confirmar borrado de caché", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (result != MessageBoxResult.Yes) return;
+                var result = AlertHelper.ShowSilentConfirm(this, "¿Deseas eliminar todos los archivos de la caché de imágenes?\nEsta acción no se puede deshacer.", "Confirmar borrado de caché");
+                if (!result) return;
 
                 var files = Directory.GetFiles(cacheDir);
                 var deleted = 0;
@@ -89,11 +89,11 @@ namespace TMRJW
                     try { Directory.Delete(d, true); } catch { }
                 }
 
-                MessageBox.Show($"Eliminados {deleted} archivos de la caché.", "Operación completada", MessageBoxButton.OK, MessageBoxImage.Information);
+                AlertHelper.ShowSilentInfo(this, $"Eliminados {deleted} archivos de la caché.", "Operación completada");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error al borrar la caché: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                try { AlertHelper.ShowSilentInfo(this, $"Error al borrar la caché: {ex.Message}", "Error"); } catch { }
             }
         }
     }

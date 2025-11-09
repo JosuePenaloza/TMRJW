@@ -56,6 +56,15 @@ namespace TMRJW
             InitializeComponent();
             UrlBox.Text = "https://wol.jw.org/es/wol/meetings/r4/lp-s/";
 
+            // Mostrar un HTML de placeholder oscuro en el WebBrowser para evitar el fondo blanco inicial
+            try
+            {
+                string darkPlaceholder = "<html><head><meta charset='utf-8'></head><body style='margin:0;background:#111;color:#E6E6E6;'><div style='width:100%;height:100vh;background:#111;'></div></body></html>";
+                WebBrowserControl.NavigateToString(darkPlaceholder);
+                try { WebBlankOverlay.Visibility = Visibility.Collapsed; } catch { }
+            }
+            catch { }
+
             // Registrar handlers: selección actualiza solo previsualización; doble click/Enter proyectan.
             // (Nota: las ListBox de cada pestaña se crean dinámicamente)
             // ImagesListBox es una propiedad de conveniencia (no asignarla).
@@ -123,6 +132,7 @@ namespace TMRJW
 
             // silenciar errores de script en el WebBrowser
             WebBrowserControl.Navigated += WebBrowserControl_Navigated;
+            WebBrowserControl.LoadCompleted += WebBrowserControl_LoadCompleted;
 
             // exponer objeto COM para que JS pueda llamar a window.external.ImageClicked(...)
             try
@@ -461,6 +471,66 @@ namespace TMRJW
 
             // también intentar inyectar script después de navegación
             InjectClickScript();
+            try
+            {
+                try
+                {
+                    var src = WebBrowserControl.Source;
+                    string host = src?.Host ?? (new Uri(UrlBox.Text)).Host;
+                    if (!string.IsNullOrEmpty(host) && host.IndexOf("wol.jw.org", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        ApplySimpleWebColors();
+                        try { InjectWolCss(); } catch { }
+                        try { InjectWolGalleryCss(); } catch { }
+                    }
+                }
+                catch { }
+            }
+            catch { }
+
+            // hide overlay when navigating to a new page
+            try { WebBlankOverlay.Visibility = Visibility.Collapsed; } catch { }
+        }
+
+        private void WebBrowserControl_LoadCompleted(object? sender, NavigationEventArgs e)
+        {
+            try
+            {
+                try
+                {
+                    var src = WebBrowserControl.Source;
+                    string host = src?.Host ?? (new Uri(UrlBox.Text)).Host;
+                    if (!string.IsNullOrEmpty(host) && host.IndexOf("wol.jw.org", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        // After load, apply simple color adjustments to DOM
+                        ApplySimpleWebColors();
+                        try { InjectWolCss(); } catch { }
+                        try { InjectWolGalleryCss(); } catch { }
+                    }
+                }
+                catch { }
+            }
+            catch { }
+
+            // if document is still blank (about:blank) keep overlay; otherwise hide
+            try
+            {
+                dynamic doc = WebBrowserControl.Document;
+                if (doc != null)
+                {
+                    string html = string.Empty;
+                    try { html = doc.documentElement?.outerHTML ?? string.Empty; } catch { }
+                    if (string.IsNullOrWhiteSpace(html) || html.Trim().Length < 20)
+                    {
+                        try { WebBlankOverlay.Visibility = Visibility.Visible; } catch { }
+                    }
+                    else
+                    {
+                        try { WebBlankOverlay.Visibility = Visibility.Collapsed; } catch { }
+                    }
+                }
+            }
+            catch { }
         }
 
         // Método llamado por ScriptBridge cuando JS hace click en una imagen dentro de la página
@@ -713,6 +783,95 @@ namespace TMRJW
             {
                 MessageBox.Show($"Error al cargar EPUB: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        // Apply a small, safe JS snippet to set body background/text color and make common containers transparent.
+        private void ApplySimpleWebColors()
+        {
+            try
+            {
+                dynamic doc = WebBrowserControl.Document;
+                if (doc == null) return;
+
+                string js = @"(function(){try{var b=document.body; if(b){ try{ b.style.backgroundColor='#111'; b.style.color='#E6E6E6'; }catch(e){} } try{var els=document.querySelectorAll('header, nav, main, section, article, footer, div'); for(var i=0;i<els.length;i++){ try{ els[i].style.background='transparent'; els[i].style.color='#E6E6E6'; }catch(e){} } }catch(e){} }catch(e){} })();";
+
+                try { doc.parentWindow.execScript(js, "JavaScript"); }
+                catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js }); } catch { } }
+            }
+            catch { }
+        }
+
+        // Inject stronger CSS targeting list items and panels used by wol.jw.org to force dark backgrounds
+        private void InjectWolCss()
+        {
+            try
+            {
+                dynamic doc = WebBrowserControl.Document;
+                if (doc == null) return;
+
+                // CSS targets many containers used by wol.jw.org to force dark backgrounds and light text
+                string css = @"
+article, .article, .section, .card, .list, .list-item, .media, .media__body, .themeContainer, .theme-container, .article-body, .article__body, .content, .content__body {
+    background: transparent !important;
+    color: #E6E6E6 !important;
+}
+.card__inner, .tile, .teaser, .row, .panel, .panel-body, .group, .teaser__body, .article-section {
+    background-color: #222 !important;
+    border-color: #333 !important;
+}
+.list-item, li, .list__item, .item, .teaser-item {
+    background-color: #222 !important;
+    color: #E6E6E6 !important;
+}
+.list-item a, .card a, a, .teaser a { color: #9CDCFE !important; }
+img, video { filter: none !important; }
+";
+
+                // encode css as base64 to safely insert into JS
+                string base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(css));
+                string js = "(function(){try{var existing=document.getElementById('tmrjw_wol_css'); if(existing){ existing.parentNode.removeChild(existing); } var s=document.createElement('style'); s.id='tmrjw_wol_css'; s.innerHTML = window.atob('" + base64 + "'); document.head.appendChild(s);}catch(e){} })();";
+                
+                try { doc.parentWindow.execScript(js, "JavaScript"); }
+                catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js }); } catch { } }
+            }
+            catch { }
+        }
+
+        // Additional dark CSS for gallery/modal elements that may appear in wol.jw.org
+        private void InjectWolGalleryCss()
+        {
+            try
+            {
+                dynamic doc = WebBrowserControl.Document;
+                if (doc == null) return;
+
+                // Stronger gallery CSS: include underlay/full/fadeOut and descendant divs
+                string galleryCss = @"
++#galleryModalContainer, #galleryModal, .gallery, .galleryWrapper, .navWrapper, .itemContainer, .carouselContainer, .contents, .header, .galleryHeaderButtons, .galleryPlayCaption, .galleryBtn, .closeBtn, .underlay, .full, .fadeOut {
+    background: #111 !important;
+    color: #E6E6E6 !important;
+}
+/* Ensure child panels inside the gallery adopt darker backgrounds */
++#galleryModalContainer .itemContainer, #galleryModal .itemContainer, #galleryModal .carouselContainer, .galleryWrapper .itemContainer, .gallery .itemContainer > div, #galleryModal .carouselContainer > div {
+    background-color: #222 !important;
+    border-color: #333 !important;
+}
+/* Neutralize loading overlays */
++#galleryModalContainer .loading, #galleryModal .loading { background: transparent !important; }
+/* Buttons and headers */
++#galleryModal .header .galleryBtn, #galleryModal .galleryHeaderButtons .galleryBtn { background: #222 !important; color: #E6E6E6 !important; }
+/* Force descendant elements to light text unless they are images */
++#galleryModalContainer, #galleryModal, #galleryModalContainer * , #galleryModal * { color: #E6E6E6 !important; }
+";
+
+                // encode css as base64 to safely insert into JS
+                string base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(galleryCss));
+                string js2 = "(function(){try{var existing=document.getElementById('tmrjw_wol_gallery_css'); if(existing){ existing.parentNode.removeChild(existing); } var s=document.createElement('style'); s.id='tmrjw_wol_gallery_css'; s.innerHTML = window.atob('" + base64 + "'); document.head.appendChild(s);}catch(e){} })();";
+
+                try { doc.parentWindow.execScript(js2, "JavaScript"); }
+                catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js2 }); } catch { } }
+            }
+            catch { }
         }
     }
 }

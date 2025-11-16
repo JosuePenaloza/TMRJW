@@ -27,6 +27,20 @@ namespace TMRJW
 
     public partial class BrowserWindow : Window
     {
+        private static void TraceStartup(string msg)
+        {
+            try
+            {
+                var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                var dir = System.IO.Path.Combine(local, "TMRJW");
+                System.IO.Directory.CreateDirectory(dir);
+                var path = System.IO.Path.Combine(dir, "startup.log");
+                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {msg}\n";
+                System.IO.File.AppendAllText(path, line);
+            }
+            catch { }
+        }
+
         private Action<BitmapImage>? _onImageSelected;
         private CancellationTokenSource? _cts;
         private static readonly HttpClient s_http = new HttpClient();
@@ -53,26 +67,114 @@ namespace TMRJW
 
         public BrowserWindow()
         {
-            InitializeComponent();
+            TraceStartup("Constructor enter");
+            try { InitializeComponent(); TraceStartup("InitializeComponent OK"); } catch(Exception ex) { TraceStartup("InitializeComponent EX: " + ex.Message); throw; }
             UrlBox.Text = "https://wol.jw.org/es/wol/meetings/r4/lp-s/";
 
-            // Mostrar un HTML de placeholder según el tema actual para evitar flash de fondo
+            // Attempt to set the window icon from Assets/icon.ico so the top-left shows the app icon
             try
             {
-                var settings = SettingsHelper.Load();
-                if (settings.IsDarkTheme)
+                var exeDir = AppContext.BaseDirectory;
+                var icoPath = System.IO.Path.Combine(exeDir, "Assets", "icon.ico");
+                if (System.IO.File.Exists(icoPath))
                 {
-                    string darkPlaceholder = "<html><head><meta charset='utf-8'></head><body style='margin:0;background:#111;color:#E6E6E6;'><div style='width:100%;height:100vh;background:#111;'></div></body></html>";
-                    WebBrowserControl.NavigateToString(darkPlaceholder);
+                    using var fs = System.IO.File.OpenRead(icoPath);
+                    var decoder = new IconBitmapDecoder(fs, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                    if (decoder.Frames.Count > 0)
+                    {
+                        this.Icon = decoder.Frames[0];
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                TraceStartup("Set Window.Icon EX: " + ex.Message);
+                // ignore and continue (fallback to exe icon)
+            }
+
+            // Set WebBlankOverlay source from file or embedded resource
+            try
+            {
+                TraceStartup("Setting WebBlankOverlay source");
+                System.Windows.Media.ImageSource? src = null;
+                try
+                {
+                    var exeDir = AppContext.BaseDirectory;
+                    var filePath = System.IO.Path.Combine(exeDir, "Assets", "logo.png");
+                    if (System.IO.File.Exists(filePath))
+                    {
+                        using var fs = System.IO.File.OpenRead(filePath);
+                        var bi = new System.Windows.Media.Imaging.BitmapImage();
+                        bi.BeginInit();
+                        bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                        bi.StreamSource = fs;
+                        bi.EndInit();
+                        bi.Freeze();
+                        src = bi;
+                    }
+                }
+                catch (Exception ex) { TraceStartup("WebBlank source from file EX: " + ex.Message); }
+
+                try
+                {
+                    if (src == null)
+                    {
+                        var uri = new Uri("pack://application:,,,/TMRJW;component/Assets/logo.png", UriKind.Absolute);
+                        var res = System.Windows.Application.LoadComponent(uri) as System.Windows.Media.ImageSource;
+                        src = res;
+                    }
+                }
+                catch (Exception ex) { TraceStartup("WebBlank source from pack EX: " + ex.Message); }
+
+                if (src != null) WebBlankOverlay.Source = src;
+                TraceStartup("WebBlankOverlay set: " + (src != null));
+            }
+            catch (Exception ex) { TraceStartup("Set WebBlankOverlay outer EX: " + ex.Message); }
+
+            // Mostrar un HTML de placeholder con el logo incrustado (data URI) para evitar problemas de airspace
+            try
+            {
+                TraceStartup("Placeholder start");
+                var settings = SettingsHelper.Load();
+                TraceStartup("Loaded settings IsDarkTheme=" + settings.IsDarkTheme);
+
+                string bg = settings.IsDarkTheme ? "#111" : "#FFF";
+                string fg = settings.IsDarkTheme ? "#E6E6E6" : "#111111";
+
+                // intentar cargar logo desde disco y convertir a base64
+                string imgData = null;
+                try
+                {
+                    var exeDir = AppContext.BaseDirectory;
+                    var logoPath = System.IO.Path.Combine(exeDir, "Assets", "logo.png");
+                    if (System.IO.File.Exists(logoPath))
+                    {
+                        var bytes = System.IO.File.ReadAllBytes(logoPath);
+                        var b64 = Convert.ToBase64String(bytes);
+                        imgData = "data:image/png;base64," + b64;
+                    }
+                }
+                catch (Exception ex) { TraceStartup("Placeholder logo read EX: " + ex.Message); }
+
+                string imgHtml = string.Empty;
+                if (!string.IsNullOrEmpty(imgData))
+                {
+                    imgHtml = $"<div style='width:100%;height:100vh;display:flex;align-items:center;justify-content:center;background:{bg};'><img src=\"{imgData}\" style=\"width:220px;height:220px;object-fit:contain;opacity:0.95;\" alt=\"Logo\"/></div>";
                 }
                 else
                 {
-                    string lightPlaceholder = "<html><head><meta charset='utf-8'></head><body style='margin:0;background:#FFFFFF;color:#111111;'><div style='width:100%;height:100vh;background:#FFF;'></div></body></html>";
-                    WebBrowserControl.NavigateToString(lightPlaceholder);
+                    imgHtml = $"<div style='width:100%;height:100vh;background:{bg};'></div>";
                 }
-                try { WebBlankOverlay.Visibility = Visibility.Collapsed; } catch { }
+
+                string html = $"<html><head><meta charset='utf-8'></head><body style='margin:0;background:{bg};color:{fg};'>{imgHtml}</body></html>";
+                try { WebBrowserControl.NavigateToString(html); } catch (Exception ex) { TraceStartup("NavigateToString EX: " + ex.Message); }
+
+                // ocultar WPF overlay porque el navegador mostrará el logo dentro de su contenido (evita problemas de airspace)
+                try { WebBlankOverlay.Visibility = Visibility.Collapsed; TraceStartup("WebBlankOverlay collapsed (using HTML logo)"); } catch (Exception ex) { TraceStartup("WebBlankOverlay set EX: " + ex.Message); }
+
+                TraceStartup("Placeholder done");
             }
-            catch { }
+            catch (Exception ex) { TraceStartup("Placeholder EX: " + ex.Message); }
 
             // Registrar handlers: selección actualiza solo previsualización; doble click/Enter proyectan.
             // (Nota: las ListBox de cada pestaña se crean dinámicamente)

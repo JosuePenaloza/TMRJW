@@ -56,11 +56,20 @@ namespace TMRJW
             InitializeComponent();
             UrlBox.Text = "https://wol.jw.org/es/wol/meetings/r4/lp-s/";
 
-            // Mostrar un HTML de placeholder oscuro en el WebBrowser para evitar el fondo blanco inicial
+            // Mostrar un HTML de placeholder según el tema actual para evitar flash de fondo
             try
             {
-                string darkPlaceholder = "<html><head><meta charset='utf-8'></head><body style='margin:0;background:#111;color:#E6E6E6;'><div style='width:100%;height:100vh;background:#111;'></div></body></html>";
-                WebBrowserControl.NavigateToString(darkPlaceholder);
+                var settings = SettingsHelper.Load();
+                if (settings.IsDarkTheme)
+                {
+                    string darkPlaceholder = "<html><head><meta charset='utf-8'></head><body style='margin:0;background:#111;color:#E6E6E6;'><div style='width:100%;height:100vh;background:#111;'></div></body></html>";
+                    WebBrowserControl.NavigateToString(darkPlaceholder);
+                }
+                else
+                {
+                    string lightPlaceholder = "<html><head><meta charset='utf-8'></head><body style='margin:0;background:#FFFFFF;color:#111111;'><div style='width:100%;height:100vh;background:#FFF;'></div></body></html>";
+                    WebBrowserControl.NavigateToString(lightPlaceholder);
+                }
                 try { WebBlankOverlay.Visibility = Visibility.Collapsed; } catch { }
             }
             catch { }
@@ -479,9 +488,17 @@ namespace TMRJW
                     string host = src?.Host ?? (new Uri(UrlBox.Text)).Host;
                     if (!string.IsNullOrEmpty(host) && host.IndexOf("wol.jw.org", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        ApplySimpleWebColors();
-                        try { InjectWolCss(); } catch { }
-                        try { InjectWolGalleryCss(); } catch { }
+                        var settings = SettingsHelper.Load();
+                        if (settings.IsDarkTheme)
+                        {
+                            ApplySimpleWebColors();
+                            try { InjectWolCss(); } catch { }
+                            try { InjectWolGalleryCss(); } catch { }
+                        }
+                        else
+                        {
+                            try { ReapplyTheme(false); } catch { }
+                        }
                     }
                 }
                 catch { }
@@ -502,10 +519,20 @@ namespace TMRJW
                     string host = src?.Host ?? (new Uri(UrlBox.Text)).Host;
                     if (!string.IsNullOrEmpty(host) && host.IndexOf("wol.jw.org", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        // After load, apply simple color adjustments to DOM
-                        ApplySimpleWebColors();
-                        try { InjectWolCss(); } catch { }
-                        try { InjectWolGalleryCss(); } catch { }
+                        var settings = SettingsHelper.Load();
+                        if (settings.IsDarkTheme)
+                        {
+                            // After load, apply simple color adjustments to DOM
+                            ApplySimpleWebColors();
+                            try { InjectWolCss(); } catch { }
+                            try { InjectWolGalleryCss(); } catch { }
+                        }
+                        else
+                        {
+                            // Remove injected style elements and reset simple body styles
+                            string js = @"(function(){try{var ids=['tmrjw_wol_css','tmrjw_wol_gallery_css']; ids.forEach(function(id){var e=document.getElementById(id); if(e&&e.parentNode){e.parentNode.removeChild(e);} }); try{ if(document.body){ document.body.style.background=''; document.body.style.color=''; } }catch(e){} }catch(e){} })();";
+                            try { WebBrowserControl.InvokeScript("eval", new object[] { js }); } catch { }
+                        }
                     }
                 }
                 catch { }
@@ -790,6 +817,7 @@ namespace TMRJW
         {
             try
             {
+                // keep legacy name: always apply dark adjustments
                 dynamic doc = WebBrowserControl.Document;
                 if (doc == null) return;
 
@@ -801,7 +829,57 @@ namespace TMRJW
             catch { }
         }
 
-        // Inject stronger CSS targeting list items and panels used by wol.jw.org to force dark backgrounds
+        // Apply light-mode simple adjustments to page so it appears with light background and dark text
+        private void ApplyLightSimpleColors()
+        {
+            try
+            {
+                dynamic doc = WebBrowserControl.Document;
+                if (doc == null) return;
+
+                string js = @"(function(){try{var b=document.body; if(b){ try{ b.style.backgroundColor='#FFFFFF'; b.style.color='#111111'; }catch(e){} } try{var els=document.querySelectorAll('header, nav, main, section, article, footer, div'); for(var i=0;i<els.length;i++){ try{ els[i].style.background='transparent'; els[i].style.color='#111111'; }catch(e){} } }catch(e){} }catch(e){} })();";
+
+                try { doc.parentWindow.execScript(js, "JavaScript"); }
+                catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js }); } catch { } }
+            }
+            catch { }
+        }
+
+        // Inject light CSS for wol.jw.org specific selectors
+        private void InjectWolLightCss()
+        {
+            try
+            {
+                dynamic doc = WebBrowserControl.Document;
+                if (doc == null) return;
+
+                string css = @"
+article, .article, .section, .card, .list, .list-item, .media, .media__body, .themeContainer, .theme-container, .article-body, .article__body, .content, .content__body {
+    background: transparent !important;
+    color: #111111 !important;
+}
+.card__inner, .tile, .teaser, .row, .panel, .panel-body, .group, .teaser__body, .article-section {
+    background-color: #FFFFFF !important;
+    border-color: #DDD !important;
+}
+.list-item, li, .list__item, .item, .teaser-item {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+}
+.list-item a, .card a, a, .teaser a { color: #0066CC !important; }
+img, video { filter: none !important; }
+";
+
+                string base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(css));
+                string js = "(function(){try{var existing=document.getElementById('tmrjw_wol_light_css'); if(existing){ existing.parentNode.removeChild(existing); } var s=document.createElement('style'); s.id='tmrjw_wol_light_css'; s.innerHTML = window.atob('" + base64 + "'); document.head.appendChild(s);}catch(e){} })();";
+
+                try { doc.parentWindow.execScript(js, "JavaScript"); }
+                catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js }); } catch { } }
+            }
+            catch { }
+        }
+
+        // Inject dark CSS for wol.jw.org specific selectors (existing behavior)
         private void InjectWolCss()
         {
             try
@@ -809,7 +887,6 @@ namespace TMRJW
                 dynamic doc = WebBrowserControl.Document;
                 if (doc == null) return;
 
-                // CSS targets many containers used by wol.jw.org to force dark backgrounds and light text
                 string css = @"
 article, .article, .section, .card, .list, .list-item, .media, .media__body, .themeContainer, .theme-container, .article-body, .article__body, .content, .content__body {
     background: transparent !important;
@@ -827,10 +904,9 @@ article, .article, .section, .card, .list, .list-item, .media, .media__body, .th
 img, video { filter: none !important; }
 ";
 
-                // encode css as base64 to safely insert into JS
                 string base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(css));
                 string js = "(function(){try{var existing=document.getElementById('tmrjw_wol_css'); if(existing){ existing.parentNode.removeChild(existing); } var s=document.createElement('style'); s.id='tmrjw_wol_css'; s.innerHTML = window.atob('" + base64 + "'); document.head.appendChild(s);}catch(e){} })();";
-                
+
                 try { doc.parentWindow.execScript(js, "JavaScript"); }
                 catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js }); } catch { } }
             }
@@ -845,31 +921,60 @@ img, video { filter: none !important; }
                 dynamic doc = WebBrowserControl.Document;
                 if (doc == null) return;
 
-                // Stronger gallery CSS: include underlay/full/fadeOut and descendant divs
                 string galleryCss = @"
-+#galleryModalContainer, #galleryModal, .gallery, .galleryWrapper, .navWrapper, .itemContainer, .carouselContainer, .contents, .header, .galleryHeaderButtons, .galleryPlayCaption, .galleryBtn, .closeBtn, .underlay, .full, .fadeOut {
+#galleryModalContainer, #galleryModal, .gallery, .galleryWrapper, .navWrapper, .itemContainer, .carouselContainer, .contents, .header, .galleryHeaderButtons, .galleryPlayCaption, .galleryBtn, .closeBtn, .underlay, .full, .fadeOut {
     background: #111 !important;
     color: #E6E6E6 !important;
 }
-/* Ensure child panels inside the gallery adopt darker backgrounds */
-+#galleryModalContainer .itemContainer, #galleryModal .itemContainer, #galleryModal .carouselContainer, .galleryWrapper .itemContainer, .gallery .itemContainer > div, #galleryModal .carouselContainer > div {
+#galleryModalContainer .itemContainer, #galleryModal .itemContainer, #galleryModal .carouselContainer, .galleryWrapper .itemContainer, .gallery .itemContainer > div, #galleryModal .carouselContainer > div {
     background-color: #222 !important;
     border-color: #333 !important;
 }
-/* Neutralize loading overlays */
-+#galleryModalContainer .loading, #galleryModal .loading { background: transparent !important; }
-/* Buttons and headers */
-+#galleryModal .header .galleryBtn, #galleryModal .galleryHeaderButtons .galleryBtn { background: #222 !important; color: #E6E6E6 !important; }
-/* Force descendant elements to light text unless they are images */
-+#galleryModalContainer, #galleryModal, #galleryModalContainer * , #galleryModal * { color: #E6E6E6 !important; }
+#galleryModalContainer .loading, #galleryModal .loading { background: transparent !important; }
+#galleryModal .header .galleryBtn, #galleryModal .galleryHeaderButtons .galleryBtn { background: #222 !important; color: #E6E6E6 !important; }
+#galleryModalContainer, #galleryModal, #galleryModalContainer * , #galleryModal * { color: #E6E6E6 !important; }
 ";
 
-                // encode css as base64 to safely insert into JS
                 string base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(galleryCss));
                 string js2 = "(function(){try{var existing=document.getElementById('tmrjw_wol_gallery_css'); if(existing){ existing.parentNode.removeChild(existing); } var s=document.createElement('style'); s.id='tmrjw_wol_gallery_css'; s.innerHTML = window.atob('" + base64 + "'); document.head.appendChild(s);}catch(e){} })();";
 
                 try { doc.parentWindow.execScript(js2, "JavaScript"); }
                 catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js2 }); } catch { } }
+            }
+            catch { }
+        }
+
+        // Called when application theme changes at runtime to reapply or remove injected site CSS
+        public void ReapplyTheme(bool isDark)
+        {
+            try
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    try
+                    {
+                        dynamic doc = null;
+                        try { doc = WebBrowserControl.Document; } catch { }
+                        if (doc == null) return;
+
+                        if (isDark)
+                        {
+                            // Re-apply dark adjustments
+                            try { ApplySimpleWebColors(); } catch { }
+                            try { InjectWolCss(); } catch { }
+                            try { InjectWolGalleryCss(); } catch { }
+                        }
+                        else
+                        {
+                            // Remove injected dark style elements and reset simple body styles, then apply light CSS
+                            string js = @"(function(){try{var ids=['tmrjw_wol_css','tmrjw_wol_gallery_css','tmrjw_wol_light_css']; ids.forEach(function(id){var e=document.getElementById(id); if(e&&e.parentNode){e.parentNode.removeChild(e);} }); try{ if(document.body){ document.body.style.background=''; document.body.style.color=''; } }catch(e){} }catch(e){} })();";
+                            try { doc.parentWindow.execScript(js, "JavaScript"); } catch { try { WebBrowserControl.InvokeScript("eval", new object[] { js }); } catch { } }
+                            try { ApplyLightSimpleColors(); } catch { }
+                            try { InjectWolLightCss(); } catch { }
+                        }
+                    }
+                    catch { }
+                });
             }
             catch { }
         }

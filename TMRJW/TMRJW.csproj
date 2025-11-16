@@ -7,6 +7,9 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<UseAppHost>false</UseAppHost>
+		<!-- Application icon for the built executable -->
+		<ApplicationIcon>Assets\app.ico</ApplicationIcon>
+		<Win32Icon>Assets\app.ico</Win32Icon>
 
 	</PropertyGroup>
 

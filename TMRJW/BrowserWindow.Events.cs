@@ -22,6 +22,9 @@ namespace TMRJW
         private bool _projectionPowerOn = false;
         private const double ZoomStep = 0.2;
 
+        // Indica si la pestaña activa es 'Videos Extras'
+        private bool _videosExtrasActive = false;
+
         private void BtnBack_Click(object sender, RoutedEventArgs e)
         {
             try { if (WebBrowserControl.CanGoBack) WebBrowserControl.GoBack(); } catch { }
@@ -73,7 +76,7 @@ namespace TMRJW
                 var addedImages = 0;
                 await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 
-                // Procesar imágenes y añadir a la pestaña de imágenes (y 'Todas')
+                // Procesar imágenes y añadir a la pestaña de imágenes (y ' Todas')
                 await Dispatcher.InvokeAsync(() =>
                 {
                     foreach (var item in imagesList)
@@ -388,7 +391,7 @@ namespace TMRJW
                                 const uint SWP_SHOWWINDOW = 0x0040;
                                 IntPtr HWND_TOPMOST = new IntPtr(-1);
                                 SetWindowPos(hWnd, HWND_TOPMOST, target.X, target.Y, target.Width, target.Height, SWP_SHOWWINDOW);
-                            }
+                              }
                         }
                         catch { }
                     }
@@ -463,22 +466,18 @@ namespace TMRJW
         {
             try
             {
-                // Si el preview local está activo (MediaElement visible y con Source), controlar reproducción local
+                // Sólo controlar reproducción en el preview (audio). No delegar a la proyección desde este botón.
                 try
                 {
                     if (PreviewMedia != null && PreviewMedia.Visibility == Visibility.Visible && PreviewMedia.Source != null)
                     {
                         if (_previewIsPlaying)
                         {
+                            // Pause playback but KEEP the timeline visible so user can seek while paused
                             PreviewMedia.Pause();
                             _previewIsPlaying = false;
                             BtnPreviewPlayPause.Content = "⏵";
-                            StopPreviewTimer();
-                            // If the preview was audio, keep the flag until user stops completely
-                            if (_previewIsAudio)
-                            {
-                                // keep _previewIsAudio true until Stop is pressed
-                            }
+                            // Keep _previewTimer running so UI remains visible and user can seek while paused
                         }
                         else
                         {
@@ -486,75 +485,7 @@ namespace TMRJW
                             _previewIsPlaying = true;
                             BtnPreviewPlayPause.Content = "⏸";
                             StartPreviewTimer();
-                            if (_previewIsAudio) { /* audio playing */ }
                         }
-                        return;
-                    }
-                }
-                catch { }
-
-                // Si no hay preview local, delegar al controlador de proyección (vídeo)
-                try
-                {
-                    // Si la última ruta seleccionada es un audio, reproducirlo en el preview en lugar de enviarlo a la proyección
-                    if (!string.IsNullOrWhiteSpace(_lastSelectedVideoPath))
-                    {
-                        var ext = Path.GetExtension(_lastSelectedVideoPath) ?? string.Empty;
-                        ext = ext.ToLowerInvariant();
-                        var audioExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".ogg", ".m4a", ".flac" };
-                        if (audioExts.Contains(ext))
-                        {
-                            // start preview audio (reuse the same flow as double-click)
-                            try
-                            {
-                                StopPreviewPlaybackAndReset();
-                                PreviewMediaControls.Visibility = Visibility.Visible;
-                                TxtPreviewInfo.Text = $"Vista preview: audio {Path.GetFileName(_lastSelectedVideoPath)}";
-                                bool isRemote = Uri.TryCreate(_lastSelectedVideoPath, UriKind.Absolute, out Uri? u) && (u.Scheme=="http"||u.Scheme=="https");
-                                await Dispatcher.InvokeAsync(() => {
-                                    try
-                                    {
-                                        PreviewImage.Visibility = Visibility.Collapsed;
-                                        PreviewMedia.Visibility = Visibility.Visible;
-                                        PreviewMedia.Source = isRemote ? u : new Uri(_lastSelectedVideoPath);
-                                        PreviewMedia.LoadedBehavior = MediaState.Manual;
-                                        PreviewMedia.Play();
-                                        _previewIsPlaying = true;
-                                        _previewIsAudio = true;
-                                        BtnPreviewPlayPause.Content = "⏸";
-                                        StartPreviewTimer();
-                                    }
-                                    catch { }
-                                });
-                            }
-                            catch { }
-                            return;
-                        }
-                    }
-
-                    var pw = EnsureProjectionWindow();
-                    if (pw == null) return;
-
-                    try { if (pw.TryResume()) { BtnPreviewPlayPause.Content = "⏸"; return; } } catch { }
-
-                    if (pw.IsPlayingVideo())
-                    {
-                        pw.PauseVideo();
-                        BtnPreviewPlayPause.Content = "⏵";
-                    }
-                    else
-                    {
-                        if (string.IsNullOrWhiteSpace(_lastSelectedVideoPath)) return;
-                        try { StopPreviewPlaybackAndReset(); } catch { }
-                        string? temp = null;
-                        try { temp = await CopyMediaToTempAsync(_lastSelectedVideoPath, forProjection: true).ConfigureAwait(false); } catch { }
-                        if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
-                        else
-                        {
-                            if (Uri.TryCreate(_lastSelectedVideoPath, UriKind.Absolute, out Uri? u) && (u.Scheme=="http"||u.Scheme=="https")) pw.PlayVideo(u);
-                            else pw.PlayVideo(_lastSelectedVideoPath);
-                        }
-                        BtnPreviewPlayPause.Content = "⏸";
                     }
                 }
                 catch { }
@@ -568,7 +499,7 @@ namespace TMRJW
             {
                 try
                 {
-                    // Si hay reproducción en preview local, pararla
+                    // Solo parar la reproducción en el preview (audio)
                     try
                     {
                         if (PreviewMedia != null && PreviewMedia.Visibility == Visibility.Visible)
@@ -579,12 +510,11 @@ namespace TMRJW
                             PreviewImage.Visibility = Visibility.Visible;
                             // cleared preview; reset audio flag
                             _previewIsAudio = false;
+                            try { StopPreviewTimer(); } catch { }
                         }
                     }
                     catch { }
 
-                    var pw = EnsureProjectionWindow();
-                    if (pw != null) pw.StopVideo();
                     BtnPreviewPlayPause.Content = "⏵";
                 }
                 catch { }
@@ -657,6 +587,8 @@ namespace TMRJW
                     };
                 }
                 _previewTimer?.Start();
+                // Mostrar la barra de tiempo del preview sólo cuando se esté reproduciendo audio y no estemos en Videos Extras
+                try { PreviewTimelinePanel.Visibility = (!_videosExtrasActive && _previewIsPlaying && _previewIsAudio) ? Visibility.Visible : Visibility.Collapsed; } catch { }
             }
             catch { }
         }
@@ -664,6 +596,8 @@ namespace TMRJW
         private void StopPreviewTimer()
         {
             try { _previewTimer?.Stop(); } catch { }
+            // Ocultar siempre la barra de tiempo cuando se detenga el timer
+            try { PreviewTimelinePanel.Visibility = Visibility.Collapsed; } catch { }
         }
 
         // Zoom / Pan básicos sobre PreviewImage (añade RenderTransform si hace falta)
@@ -759,9 +693,136 @@ namespace TMRJW
             catch { }
         }
         // -------------------------
-        // Helpers para layout responsivo (WrapPanel)
-        // -------------------------
 
+
+        // VideosExtras controls: Play/Pause toggle and Stop
+        private void BtnVideosPlayPause_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var btn = sender as System.Windows.Controls.Button;
+                var pw = EnsureProjectionWindow();
+                if (pw == null) return;
+
+                try
+                {
+                    if (pw.IsPlayingVideo())
+                    {
+                        pw.PauseVideo();
+                        if (btn != null) btn.Content = "⏵";
+                        return;
+                    }
+
+                    // If paused or no source loaded, either resume or load selected
+                    if (!string.IsNullOrWhiteSpace(pw.CurrentVideoSource))
+                    {
+                        pw.TryResume();
+                        if (btn != null) btn.Content = "⏸";
+                        return;
+                    }
+
+                    var lb = GetActiveListBox();
+                    if (lb == null) return;
+                    var selected = lb.SelectedItem;
+                    string? path = null;
+                    if (selected is VideoListItem vli) path = vli.FilePath;
+                    else if (selected is string s) path = s;
+                    if (string.IsNullOrWhiteSpace(path)) return;
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            string? temp = await CopyMediaToTempAsync(path, forProjection: true).ConfigureAwait(false);
+                            await Dispatcher.InvokeAsync(() =>
+                            {
+                                try
+                                {
+                                    if (!string.IsNullOrWhiteSpace(temp)) pw.PlayVideo(temp);
+                                    else
+                                    {
+                                        if (Uri.TryCreate(path, UriKind.Absolute, out Uri? u) && (u.Scheme=="http"||u.Scheme=="https")) pw.PlayVideo(u);
+                                        else pw.PlayVideo(path);
+                                    }
+                                    if (btn != null) btn.Content = "⏸";
+                                }
+                                catch { }
+                            });
+                        }
+                        catch { }
+                    });
+                }
+                catch { }
+            }
+            catch { }
+        }
+
+        private void BtnVideosStop_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw)
+                    {
+                        try { pw.StopVideo(); } catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Volume slider for videos (applies to projection windows)
+        private void VideosVolumeSld_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            try
+            {
+                var vol = (sender as Slider)?.Value ?? 75.0;
+                double level = Math.Max(0.0, Math.Min(100.0, vol)) / 100.0;
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw) { try { pw.SetVolume(level); } catch { } }
+                }
+            }
+            catch { }
+        }
+
+        private bool _isVideosSeeking = false;
+        private void VideosSldTimeline_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            _isVideosSeeking = true;
+        }
+
+        private void VideosSldTimeline_PreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            _isVideosSeeking = false;
+            try
+            {
+                var pw = EnsureProjectionWindow();
+                if (pw != null) pw.SeekToFraction(VideosSldTimeline.Value);
+            }
+            catch { }
+        }
+
+        private void VideosSldTimeline_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isVideosSeeking)
+            {
+                try
+                {
+                    var pw = EnsureProjectionWindow();
+                    var dur = pw?.GetVideoDuration();
+                    if (dur.HasValue)
+                    {
+                        var pos = TimeSpan.FromSeconds(VideosSldTimeline.Value * dur.Value.TotalSeconds);
+                        TxtVideosCurrentTime.Text = pos.ToString(@"hh\:mm\:ss");
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // Helpers for layout and utilities
         private void UpdateWrapPanelItemSize()
         {
             try
@@ -796,7 +857,6 @@ namespace TMRJW
             catch { }
         }
 
-        // Helper para buscar hijo visual
         private static T? FindVisualChild<T>(DependencyObject depObj) where T : DependencyObject
         {
             if (depObj == null) return null;
@@ -810,7 +870,6 @@ namespace TMRJW
             return null;
         }
 
-        // Buscar instancias de ProyeccionWindow y actualizar sus transformaciones
         private void SyncProjectionTransform(double scale, double offsetX, double offsetY)
         {
             try
@@ -819,18 +878,13 @@ namespace TMRJW
                 {
                     if (w is ProyeccionWindow pw)
                     {
-                        try
-                        {
-                            pw.UpdateImageTransform(scale, offsetX, offsetY);
-                        }
-                        catch { /* ignorar errores de sincronización */ }
+                        try { pw.UpdateImageTransform(scale, offsetX, offsetY); } catch { }
                     }
                 }
             }
             catch { }
         }
 
-        // Helpers para cache/IO
         private BitmapImage? LoadBitmapFromFileCached(string path)
         {
             try
@@ -920,5 +974,49 @@ namespace TMRJW
             catch { }
         }
 
+        // Mostrar/ocultar controles exclusivos para Videos Extras según la pestaña activa
+        private void UpdateVideosExtrasControlsVisibility()
+        {
+            try
+            {
+                var active = GetActiveListBox();
+                bool show = false;
+                if (InventoryTabs.SelectedItem is TabItem ti && ti.Tag is string tag)
+                {
+                    if (tag.StartsWith("Videos:", StringComparison.OrdinalIgnoreCase) && tag.IndexOf("Extras", StringComparison.OrdinalIgnoreCase) >= 0)
+                        show = true;
+                }
+
+                Dispatcher.Invoke(() =>
+                {
+                    try { VideosExtrasControlsPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed; } catch { }
+                    // Mantener el estado para que otros handlers eviten mostrar controles de audio cuando estemos en Videos Extras
+                    _videosExtrasActive = show;
+                    try
+                    {
+                        if (show)
+                        {
+                            // ocultar controles de audio en preview para evitar conflictos
+                            try { PreviewMediaControls.Visibility = Visibility.Collapsed; } catch { }
+                            try { PreviewTimelinePanel.Visibility = Visibility.Collapsed; } catch { }
+                        }
+                        else
+                        {
+                            // Si salimos de la pestaña Videos Extras y hay un audio en reproducción, mostrar la barra de tiempo
+                            try
+                            {
+                                if (_previewIsPlaying && _previewIsAudio)
+                                {
+                                    try { PreviewTimelinePanel.Visibility = Visibility.Visible; } catch { }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                });
+            }
+            catch { }
+        }
     }
 }

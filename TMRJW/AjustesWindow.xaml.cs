@@ -19,6 +19,13 @@ namespace TMRJW
             var settings = SettingsHelper.Load();
             TxtImagenTextoAnioRuta.Text = settings.ImagenTextoAnio ?? string.Empty;
             TxtFfmpegPath.Text = settings.FfmpegPath ?? string.Empty;
+            // Set toggle initial state (use FindName to avoid direct generated field dependency)
+            try
+            {
+                var tb = this.FindName("BtnToggleTheme") as System.Windows.Controls.Primitives.ToggleButton;
+                if (tb != null) tb.IsChecked = settings.IsDarkTheme;
+            }
+            catch { }
 
             // La lista de monitores se completa en AjustesWindow_Loaded (PopulateMonitorsListNative)
         }
@@ -69,11 +76,7 @@ namespace TMRJW
         private void BtnBorrarImagen_Click(object sender, RoutedEventArgs e)
         {
             TxtImagenTextoAnioRuta.Text = string.Empty;
-            MessageBox.Show(
-                "La ruta de la imagen ha sido borrada. Recuerda guardar los ajustes para que el cambio se aplique.",
-                "Imagen Borrada",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            AlertHelper.ShowSilentInfo(this, "La ruta de la imagen ha sido borrada. Recuerda guardar los ajustes para que el cambio se aplique.", "Imagen Borrada");
         }
 
         private void BtnSeleccionarFfmpeg_Click(object sender, RoutedEventArgs e)
@@ -103,8 +106,7 @@ namespace TMRJW
             Settings.Default.MonitorSalidaIndex = CboMonitorSalida.SelectedIndex;
             Settings.Default.Save();
 
-            MessageBox.Show("Configuración guardada.", "Guardado Exitoso",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            AlertHelper.ShowSilentInfo(this, "Configuración guardada.", "Guardado Exitoso");
 
             this.Close();
         }
@@ -130,7 +132,7 @@ namespace TMRJW
 
                 SettingsHelper.Save(settings);
 
-                MessageBox.Show("Ajustes guardados.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                AlertHelper.ShowSilentInfo(this, "Ajustes guardados.", "Información");
                 this.Close();
             }
             catch (Exception ex)
@@ -145,16 +147,46 @@ namespace TMRJW
 
         private void BtnBorrarSemanaActual_Click(object sender, RoutedEventArgs e)
         {
-            var result = MessageBox.Show(
-                "¿Está seguro que desea borrar la semana actual del programa cargado?",
-                "Confirmar Borrado",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-
-            if (result == MessageBoxResult.Yes)
+            var result = AlertHelper.ShowSilentConfirm(this, "¿Está seguro que desea borrar la semana actual del programa cargado?", "Confirmar Borrado");
+            if (result)
             {
-                MessageBox.Show("Borrado de semana solicitado.", "Pendiente");
+                AlertHelper.ShowSilentInfo(this, "Borrado de semana solicitado.", "Pendiente");
             }
+        }
+
+        private void BtnToggleTheme_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                bool isDark = false;
+                try { isDark = (sender as System.Windows.Controls.Primitives.ToggleButton)?.IsChecked == true; } catch { }
+
+                // Swap merged dictionary in App resources
+                var app = Application.Current as App;
+                if (app == null) return;
+                var dicts = app.Resources.MergedDictionaries;
+                // remove existing theme dictionaries
+                for (int i = dicts.Count - 1; i >= 0; i--)
+                {
+                    var src = dicts[i].Source?.OriginalString ?? string.Empty;
+                    if (src.Contains("Themes/DarkTheme.xaml") || src.Contains("Themes/LightTheme.xaml"))
+                        dicts.RemoveAt(i);
+                }
+                var newDict = new ResourceDictionary();
+                newDict.Source = new System.Uri(isDark ? "Themes/DarkTheme.xaml" : "Themes/LightTheme.xaml", System.UriKind.Relative);
+                dicts.Add(newDict);
+
+
+                // Persist preference
+                try
+                {
+                    var s = SettingsHelper.Load();
+                    s.IsDarkTheme = isDark;
+                    SettingsHelper.Save(s);
+                }
+                catch { }
+            }
+            catch { }
         }
     }
 }

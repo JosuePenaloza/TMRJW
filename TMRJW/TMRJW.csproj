@@ -7,7 +7,6 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<UseAppHost>false</UseAppHost>
-
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -15,6 +14,17 @@
 		<PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
 		<PackageReference Include="NuGet.Versioning" Version="6.14.0" />
 		<PackageReference Include="VersOne.Epub" Version="3.3.4" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Content Include="Assets\icon.ico">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+			<CopyToPublishDirectory>Always</CopyToPublishDirectory>
+		</Content>
+		<Content Include="Assets\logo.png">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+			<CopyToPublishDirectory>Always</CopyToPublishDirectory>
+		</Content>
 	</ItemGroup>
 
 	<ItemGroup>
@@ -34,5 +44,7 @@
 			<LastGenOutput>Settings.Designer.cs</LastGenOutput>
 		</None>
 	</ItemGroup>
+
+	<!-- Assets copied to output/publish; not embedded as WPF pack resources -->
 
 </Project>

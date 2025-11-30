@@ -54,6 +54,7 @@ namespace TMRJW
                 try
                 {
                     var settings = SettingsHelper.Load();
+                    bool useFloating = settings.UseFloatingProjectionWindow;
                     var selectedDevice = settings.SelectedMonitorDeviceName;
                     var monitors = PlatformInterop.GetMonitorsNative();
                     PlatformInterop.MonitorInfo? target = null;
@@ -68,13 +69,14 @@ namespace TMRJW
 
                     if (target != null)
                     {
-                        projWin.WindowStartupLocation = WindowStartupLocation.Manual;
-                        projWin.Width = target.Width;
-                        projWin.Height = target.Height;
-                        projWin.WindowStyle = WindowStyle.None;
-                        projWin.ResizeMode = ResizeMode.NoResize;
-                        projWin.Topmost = true;
-                        projWin.ShowInTaskbar = false;
+                        if (useFloating)
+                        {
+                            projWin.ConfigureAsFloatingWindow(900, 600);
+                        }
+                        else
+                        {
+                            projWin.ConfigureFullscreenOnMonitor(target);
+                        }
                     }
                 }
                 catch { }
@@ -106,14 +108,27 @@ namespace TMRJW
 
                     if (target != null)
                     {
-                        var helper = new System.Windows.Interop.WindowInteropHelper(projWin);
-                        IntPtr hWnd = helper.Handle;
-                        if (hWnd != IntPtr.Zero)
+                        // Ensure the window is properly placed (fullscreen mode already sets bounds). If floating, center it on selected monitor.
+                        try
                         {
-                            const uint SWP_SHOWWINDOW = 0x0040;
-                            IntPtr HWND_TOPMOST = new IntPtr(-1);
-                            SetWindowPos(hWnd, HWND_TOPMOST, target.X, target.Y, target.Width, target.Height, SWP_SHOWWINDOW);
+                            var settings2 = SettingsHelper.Load();
+                            if (settings2.UseFloatingProjectionWindow)
+                            {
+                                projWin.MoveToMonitor(target);
+                            }
+                            else
+                            {
+                                var helper = new System.Windows.Interop.WindowInteropHelper(projWin);
+                                IntPtr hWnd = helper.Handle;
+                                if (hWnd != IntPtr.Zero)
+                                {
+                                    const uint SWP_SHOWWINDOW = 0x0040;
+                                    IntPtr HWND_TOPMOST = new IntPtr(-1);
+                                    SetWindowPos(hWnd, HWND_TOPMOST, target.X, target.Y, target.Width, target.Height, SWP_SHOWWINDOW);
+                                }
+                            }
                         }
+                        catch { }
                     }
                 }
                 catch { }

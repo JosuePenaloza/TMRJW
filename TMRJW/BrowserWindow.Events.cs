@@ -522,6 +522,58 @@ namespace TMRJW
             catch { }
         }
 
+        // Toggle projection mode between fullscreen and floating via button
+        private void BtnToggleProjMode_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var settings = SettingsHelper.Load();
+                settings.UseFloatingProjectionWindow = !settings.UseFloatingProjectionWindow;
+                SettingsHelper.Save(settings);
+
+                // Update checkbox in AjustesWindow if open
+                try
+                {
+                    foreach (Window w in Application.Current.Windows)
+                    {
+                        if (w is AjustesWindow aw)
+                        {
+                            try { var chk = aw.FindName("ChkFloatingProjection") as System.Windows.Controls.CheckBox; if (chk != null) chk.IsChecked = settings.UseFloatingProjectionWindow; } catch { }
+                        }
+                    }
+                }
+                catch { }
+
+                // Reconfigure existing projection window if present
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw)
+                    {
+                        try
+                        {
+                            var monitors = PlatformInterop.GetMonitorsNative();
+                            // prefer saved device, else non-primary then primary
+                            PlatformInterop.MonitorInfo? target = null;
+                            var dev = settings.SelectedMonitorDeviceName;
+                            if (!string.IsNullOrEmpty(dev)) target = monitors.Find(m => string.Equals(m.DeviceName, dev, StringComparison.OrdinalIgnoreCase));
+                            if (target == null) target = monitors.Find(m => !m.IsPrimary) ?? monitors.Find(m => m.IsPrimary) ?? (monitors.Count>0?monitors[0]:null);
+                            if (target != null)
+                            {
+                                if (settings.UseFloatingProjectionWindow)
+                                    pw.ConfigureAsFloatingWindow((int)Math.Min(1600, target.Width*0.5), (int)Math.Min(1000, target.Height*0.5));
+                                else
+                                    pw.ConfigureFullscreenOnMonitor(target);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                try { AlertHelper.ShowSilentInfo(this, "Modo de proyección cambiado.", "Información"); } catch { }
+            }
+            catch { }
+        }
+
         private void BtnPreviewPrev_Click(object sender, RoutedEventArgs e)
         {
             try

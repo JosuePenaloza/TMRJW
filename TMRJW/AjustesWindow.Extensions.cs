@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 
 namespace TMRJW
 {
@@ -17,6 +18,13 @@ namespace TMRJW
                 // cargar settings y rellenar lista de monitores
                 var settings = SettingsHelper.Load();
                 PopulateMonitorsListNative(settings.SelectedMonitorDeviceName);
+                // asegurarse de que el checkbox (palomeo) refleje el setting si existe
+                try
+                {
+                    var chk = this.FindName("ChkFloatingProjection") as CheckBox;
+                    if (chk != null) chk.IsChecked = settings.UseFloatingProjectionWindow;
+                }
+                catch { }
                 // mostrar ruta guardada si existe
                 if (!string.IsNullOrEmpty(settings.ImagenTextoAnio))
                     TxtImagenTextoAnioRuta.Text = settings.ImagenTextoAnio;
@@ -24,6 +32,58 @@ namespace TMRJW
                 // mostrar ruta FFmpeg si existe
                 if (!string.IsNullOrEmpty(settings.FfmpegPath))
                     try { TxtFfmpegPath.Text = settings.FfmpegPath; } catch { }
+            }
+            catch { }
+        }
+
+        // Handler para checkbox que selecciona modo flotante
+        private void ChkFloatingProjection_CheckedChanged(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var chk = sender as CheckBox;
+                var s = SettingsHelper.Load();
+                s.UseFloatingProjectionWindow = chk != null && chk.IsChecked == true;
+                SettingsHelper.Save(s);
+            }
+            catch { }
+        }
+
+        // Botón que mueve la proyección al monitor seleccionado inmediatamente
+        private void BtnMoveProjectionNow_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var s = SettingsHelper.Load();
+                var monitors = PlatformInterop.GetMonitorsNative();
+                PlatformInterop.MonitorInfo? target = null;
+                if (CboMonitorSalida.SelectedItem is ComboBoxItem cbi && cbi.Tag is string tag)
+                {
+                    target = monitors.Find(m => string.Equals(m.DeviceName, tag, StringComparison.OrdinalIgnoreCase));
+                }
+                else
+                {
+                    int idx = CboMonitorSalida.SelectedIndex;
+                    if (idx >= 0 && idx < monitors.Count) target = monitors[idx];
+                }
+
+                if (target == null) return;
+
+                // Find projection window and move it
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (w is ProyeccionWindow pw)
+                    {
+                        try
+                        {
+                            if (s.UseFloatingProjectionWindow)
+                                pw.MoveToMonitor(target);
+                            else
+                                pw.ConfigureFullscreenOnMonitor(target);
+                        }
+                        catch { }
+                    }
+                }
             }
             catch { }
         }

@@ -5,6 +5,8 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Runtime.InteropServices;
+using System.Linq;
 
 namespace TMRJW
 {
@@ -490,6 +492,208 @@ namespace TMRJW
         public void SetLastWasTextoAnio(bool v)
         {
             _lastWasTextoAnio = v;
+        }
+
+        /// <summary>
+        /// Configure this projection window as fullscreen on the given monitor.
+        /// </summary>
+        internal void ConfigureFullscreenOnMonitor(PlatformInterop.MonitorInfo monitor)
+        {
+            if (monitor == null) return;
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                try
+                {
+                    // Use the monitor bounds (not just work area) to cover full screen
+                    this.WindowStartupLocation = WindowStartupLocation.Manual;
+                    this.WindowStyle = WindowStyle.None;
+                    this.ResizeMode = ResizeMode.NoResize;
+                    this.Topmost = true;
+                    this.ShowInTaskbar = false;
+
+                    this.Left = monitor.X;
+                    this.Top = monitor.Y;
+                    this.Width = monitor.Width;
+                    this.Height = monitor.Height;
+
+                    // Ensure normal state and visible
+                    try { this.WindowState = WindowState.Normal; } catch { }
+
+                    // Apply an extra native 'frame changed' so the OS really removes caption/buttons.
+                    try { ApplyBorderlessNative(); } catch { }
+
+                    try { this.Show(); this.Activate(); } catch { }
+                }
+                catch { }
+            }), System.Windows.Threading.DispatcherPriority.Normal);
+        }
+
+        /// <summary>
+        /// Configure this projection window as a normal floating window the user can drag and resize.
+        /// </summary>
+        public void ConfigureAsFloatingWindow(int initialWidth = 900, int initialHeight = 600)
+        {
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                try
+                {
+                    this.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                    this.WindowStyle = WindowStyle.SingleBorderWindow;
+                    this.ResizeMode = ResizeMode.CanResize;
+                    this.Topmost = false;
+                    this.ShowInTaskbar = true;
+
+                    if (initialWidth > 0 && initialHeight > 0)
+                    {
+                        this.Width = initialWidth;
+                        this.Height = initialHeight;
+                    }
+
+                    try { this.WindowState = WindowState.Normal; } catch { }
+                    try { this.Show(); this.Activate(); } catch { }
+                }
+                catch { }
+            }), System.Windows.Threading.DispatcherPriority.Normal);
+        }
+
+        /// <summary>
+        /// Move the window to the requested monitor (keep current window chrome)
+        /// </summary>
+        internal void MoveToMonitor(PlatformInterop.MonitorInfo monitor)
+        {
+            if (monitor == null) return;
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                try
+                {
+                    // If currently floating, center on the monitor; if fullscreen style, adjust bounds
+                    if (this.WindowStyle == WindowStyle.None)
+                    {
+                        this.Left = monitor.X;
+                        this.Top = monitor.Y;
+                        this.Width = monitor.Width;
+                        this.Height = monitor.Height;
+                    }
+                    else
+                    {
+                        // Center the floating window within the monitor bounds
+                        var newLeft = monitor.X + (monitor.Width - this.ActualWidth) / 2.0;
+                        var newTop = monitor.Y + (monitor.Height - this.ActualHeight) / 2.0;
+                        this.Left = Math.Max(monitor.X, newLeft);
+                        this.Top = Math.Max(monitor.Y, newTop);
+                    }
+                    try { this.Activate(); } catch { }
+                }
+                catch { }
+            }), System.Windows.Threading.DispatcherPriority.Normal);
+        }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetCursorPos(out POINT lpPoint);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int X; public int Y; }
+
+        private PlatformInterop.MonitorInfo? GetMonitorFromPoint(System.Windows.Point p)
+        {
+            try
+            {
+                var monitors = PlatformInterop.GetMonitorsNative();
+                foreach (var m in monitors)
+                {
+                    if (p.X >= m.X && p.X < m.X + m.Width && p.Y >= m.Y && p.Y < m.Y + m.Height)
+                        return m;
+                }
+                return monitors.FirstOrDefault();
+            }
+            catch { return null; }
+        }
+
+        private void Window_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            try
+            {
+                // Get cursor pos in screen coordinates
+                if (!GetCursorPos(out POINT pt)) return;
+                var p = new System.Windows.Point(pt.X, pt.Y);
+                var monitor = GetMonitorFromPoint(p) ?? PlatformInterop.GetMonitorsNative().FirstOrDefault();
+                if (monitor == null) return;
+
+                if (this.WindowStyle == WindowStyle.None)
+                {
+                    // currently fullscreen -> switch to floating centered on same monitor
+                    ConfigureAsFloatingWindow((int)Math.Min(1600, monitor.Width * 0.6), (int)Math.Min(1000, monitor.Height * 0.6));
+                    // Move to monitor center
+                    MoveToMonitor(monitor);
+                }
+                else
+                {
+                    // currently floating -> make fullscreen on monitor where double clicked
+                    ConfigureFullscreenOnMonitor(monitor);
+                }
+            }
+            catch { }
+        }
+
+        // --------------------------------------------------
+        // Native helpers to ensure the window is truly borderless
+        // --------------------------------------------------
+        private const int GWL_STYLE = -16;
+        private const long WS_CAPTION = 0x00C00000;
+        private const long WS_SYSMENU = 0x00080000;
+        private const long WS_THICKFRAME = 0x00040000;
+        private const long WS_MINIMIZEBOX = 0x00020000;
+        private const long WS_MAXIMIZEBOX = 0x00010000;
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr", SetLastError = true)]
+        private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr", SetLastError = true)]
+        private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+        private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+        private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        private static IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private const uint SWP_FRAMECHANGED = 0x0020;
+        private const uint SWP_SHOWWINDOW = 0x0040;
+
+        private static IntPtr GetWindowLongPtrSafe(IntPtr hWnd, int nIndex)
+        {
+            if (IntPtr.Size == 8) return GetWindowLongPtr64(hWnd, nIndex);
+            return new IntPtr(GetWindowLong32(hWnd, nIndex));
+        }
+
+        private static IntPtr SetWindowLongPtrSafe(IntPtr hWnd, int nIndex, IntPtr newLong)
+        {
+            if (IntPtr.Size == 8) return SetWindowLongPtr64(hWnd, nIndex, newLong);
+            return new IntPtr(SetWindowLong32(hWnd, nIndex, newLong.ToInt32()));
+        }
+
+        private void ApplyBorderlessNative()
+        {
+            try
+            {
+                var helper = new System.Windows.Interop.WindowInteropHelper(this);
+                IntPtr hWnd = helper.Handle;
+                if (hWnd == IntPtr.Zero) return;
+
+                var stylePtr = GetWindowLongPtrSafe(hWnd, GWL_STYLE);
+                long style = stylePtr.ToInt64();
+
+                long remove = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+                long newStyle = style & ~remove;
+
+                SetWindowLongPtrSafe(hWnd, GWL_STYLE, new IntPtr(newStyle));
+
+                // Force the window manager to re-apply the frame styles and move/resize into place
+                SetWindowPos(hWnd, HWND_TOPMOST, (int)this.Left, (int)this.Top, (int)this.Width, (int)this.Height, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+            }
+            catch { }
         }
     }
 }

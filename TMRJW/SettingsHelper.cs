@@ -12,6 +12,8 @@ namespace TMRJW
             public string? ImagenTextoAnio { get; set; }
             public string? FfmpegPath { get; set; }
             public bool IsDarkTheme { get; set; } = true;
+            // Default to floating projection window as requested
+            public bool UseFloatingProjectionWindow { get; set; } = true;
         }
 
         private static string GetPath()

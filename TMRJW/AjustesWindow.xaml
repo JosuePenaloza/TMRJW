@@ -55,7 +55,13 @@
                         Click="BtnBorrarCache_Click"/>
 
                 <TextBlock Text="Monitor de Salida" Foreground="LightGray" Margin="0,0,0,5"/>
-                <ComboBox x:Name="CboMonitorSalida" Margin="0,0,0,15"/>
+                <ComboBox x:Name="CboMonitorSalida" Margin="0,0,0,8"/>
+
+                <!-- Nuevo: checkbox para modo ventana flotante y botón mover -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,15" VerticalAlignment="Center">
+                    <CheckBox x:Name="ChkFloatingProjection" Content="Usar ventana flotante (arrastrable)" VerticalAlignment="Center" Checked="ChkFloatingProjection_CheckedChanged" Unchecked="ChkFloatingProjection_CheckedChanged" Foreground="LightGray" />
+                    <Button x:Name="BtnMoveProjectionNow" Content="Mover proyección ahora" Width="160" Margin="12,0,0,0" Click="BtnMoveProjectionNow_Click" />
+                </StackPanel>
 
                 <!-- Ruta a FFmpeg -->
                 <TextBlock Text="Ruta a FFmpeg (carpeta bin de x64)" Foreground="LightGray" Margin="0,0,0,5"/>

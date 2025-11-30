@@ -238,6 +238,8 @@
                     <!-- Orden: Proyección (izquierda), Ajustes (centro), Cargar archivos (derecha) -->
                     <Button x:Name="BtnProjectionPower" Content="⏻" Background="#FF8C00" Foreground="White" Height="30" Width="36"
                             Click="BtnProjectionPower_Click" Margin="0,0,6,0" FontSize="16" ToolTip="Encender/Apagar proyección"/>
+                    <Button x:Name="BtnToggleProjMode" Content="⤢" Background="#6A1B9A" Foreground="White" Height="30" Width="36"
+                            Click="BtnToggleProjMode_Click" Margin="0,0,6,0" FontSize="14" ToolTip="Cambiar modo: Pantalla completa / Flotante"/>
                     <Button x:Name="BtnOpenAjustesSmall" Content="⚙" Background="#1976D2" Foreground="White" Height="30" Width="36"
                             Click="BtnOpenAjustes_Click" Margin="0,0,6,0" ToolTip="Ajustes"/>
                     <Button x:Name="BtnLoadExtra" Content="📁" Background="#8E24AA" Foreground="White" Height="30" Width="36"
